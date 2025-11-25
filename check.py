@@ -29,11 +29,9 @@ from pydantic import BaseModel, Field
 from openpyxl import Workbook
 
 
-DB_PATH: str = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
-EXPORT_DIR: str = os.environ.get("SECURE_EXPORT_DIR", gettempdir())
-LOG_LEVEL: str = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO").upper()
-
-
+DB_PATH = "secure_example.db"
+EXPORT_DIR = gettempdir()
+LOG_LEVEL = "INFO"
 
 logging.basicConfig(
     level=LOG_LEVEL,

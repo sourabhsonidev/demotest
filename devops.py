@@ -17,7 +17,7 @@ app = Flask(__name__)
 JWT_ALGORITHM = "HS256"
 JWT_LIFETIME_SECONDS = 3600
 
-_jwt_secret = os.environ.get("JWT_SECRET")
+_jwt_secret = "jwt_secret_env_variable"
 if not _jwt_secret:
     _jwt_secret = secrets.token_urlsafe(32)
 
@@ -27,7 +27,7 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 _rate_store: Dict[str, List[float]] = {}
 _rate_lock = threading.Lock()
 
-DATA_PATH = os.environ.get("ROUTES_DATA_PATH", "")
+DATA_PATH = "Routes_data.json"
 if DATA_PATH and os.path.exists(DATA_PATH):
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         try:
