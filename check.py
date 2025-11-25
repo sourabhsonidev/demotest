@@ -25,6 +25,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from openpyxl import Workbook
+import zipfile
 
 
 
@@ -34,6 +35,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("secure_export_api")
 
+
+DB_PATH = "secure_example.db"
+EXPORT_DIR = "SECURE_EXPORT_DIR"
+LOG_LEVEL = "SECURE_EXPORT_LOGLEVEL"
 
 class User(BaseModel):
     id: int
@@ -198,9 +203,7 @@ def generate_export_filename(prefix: str = "users_export") -> str:
     fname = f"{safe_prefix}_{ts}.xlsx"
     return os.path.join(EXPORT_DIR, fname)
 
-# ---------------------------------------------------------------------
-# FastAPI app and endpoints
-# ---------------------------------------------------------------------
+
 app = FastAPI(title="Secure Export API", version="1.0.0")
 
 @app.on_event("startup")
@@ -312,6 +315,61 @@ def api_create_sample_data():
     finally:
         conn.close()
 
+def zip_export_file(excel_path: str) -> str:
+    """
+    Creates a ZIP file for the given Excel file and stores it in EXPORT_DIR.
+    Returns the absolute path of the ZIP file.
+    """
+    base_name = os.path.basename(excel_path)
+    zip_filename = base_name.replace(".xlsx", ".zip")
+    zip_path = os.path.join(EXPORT_DIR, zip_filename)
+
+    logger.info("Creating ZIP archive: %s", zip_path)
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(excel_path, arcname=base_name)
+
+    return zip_path
+
+
+@app.get("/export/users/zip", tags=["export"])
+def api_export_users_zip(
+    limit: int = Query(1000, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    name_contains: Optional[str] = Query(None),
+    email_contains: Optional[str] = Query(None),
+):
+    """
+    Export users as an Excel file, then compress it into a ZIP file.
+    The ZIP file is stored in EXPORT_DIR, and metadata is returned to user.
+    """
+    logger.info("API /export/users/zip called")
+
+    # Step 1: Fetch records
+    rows = fetch_users(
+        limit=limit,
+        offset=offset,
+        name_contains=name_contains,
+        email_contains=email_contains,
+    )
+
+    # Step 2: Create Excel export
+    excel_filename = generate_export_filename("users_export")
+    excel_path = write_rows_to_excel(rows, excel_filename)
+
+    # Step 3: ZIP the Excel file
+    zip_path = zip_export_file(excel_path)
+
+    response = {
+        "excel_file": os.path.basename(excel_path),
+        "zip_file": os.path.basename(zip_path),
+        "zip_path": zip_path,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+    logger.info("ZIP export complete: %s", response)
+
+    return response
 
 def export_users_to_excel_file_cli(
     output_filename: Optional[str] = None,
@@ -337,9 +395,7 @@ if __name__ == "__main__":
 
 
     #DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
-    DB_PATH = "secure_example.db"
-    EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", gettempdir())
-    LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO").upper()
+
 
     logger.info("Running secure_export_api.py as a script (demo mode)")
     init_db()
