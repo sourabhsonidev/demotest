@@ -333,4 +333,22 @@ def run_dev():
     app.run(host="0.0.0.0", port=port, debug=debug)
 
 if __name__ == "__main__":
-    run_dev()
+    # Example usage (requires a running MongoDB instance)
+    coll = "devops_examples"
+    # MONGO_URI="mongodb://localhost:27017"
+    # DEFAULT_DB = "test"
+    try:
+        inserted = insert_one_document(coll, {"name": "devops", "value": 1})
+        print("Inserted:", inserted)
+
+        found = find_one_document(coll, {"name": "devops"})
+        print("Found:", found)
+
+        updated = update_one_document(coll, {"name": "devops"}, {"$set": {"value": 2}})
+        print("Updated:", updated)
+
+        deleted = delete_one_document(coll, {"name": "devops"})
+        print("Deleted:", deleted)
+    except Exception as e:
+        logger.exception("Example run failed: %s", e)
+    print("--- REMEDIATION: NEVER use eval() on untrusted input. Use ast.literal_eval instead. ---")

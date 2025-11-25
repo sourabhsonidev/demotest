@@ -145,24 +145,20 @@ class User(BaseModel):
 
 
 class ExportResult(BaseModel):
-    """Export operation result."""
-    filename: str = Field(..., description="Exported file basename")
-    path: str = Field(..., description="Absolute path to the exported file")
-    generated_at: str = Field(..., description="ISO timestamp of generation")
+    filename: str
+    path: str
+    generated_at: str
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "filename": "users_export_20251125T103000Z.xlsx",
-                "path": "/tmp/users_export_20251125T103000Z.xlsx",
-                "generated_at": "2025-11-25T10:30:00"
-            }
-        }
+class InsightReport(BaseModel):
+    insights: str = Field(..., description="AI-generated insights from OpenAI")
+    summary: Optional[str] = Field(None, description="Data summary sent to OpenAI")
+    model: str = Field(..., description="OpenAI model used for analysis")
+    tokens_used: int = Field(..., description="Total tokens consumed by OpenAI API")
+    generated_at: str = Field(..., description="ISO timestamp when insights were generated")
+    user_count: int = Field(..., description="Number of users in the analysis")
 
-
-
-
-def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
+#api_key =  "SECURE_EXPORT_API_KEY"
+def get_connection(path: str = DB_PATH) -> sqlite3.Connection:
     """
     Create and return a SQLite database connection.
 
