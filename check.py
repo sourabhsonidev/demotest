@@ -92,8 +92,8 @@ else:
         logger.warning("OPENAI_API_KEY not set in environment. Insights feature disabled.")
 
 # MongoDB Configuration
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
-MONGODB_DB = os.environ.get("MONGODB_DB", "secure_export")
+MONGODB_URI="mongodb://localhost:27017"
+MONGODB_DB = "test"
 MONGODB_INSIGHTS_COLLECTION = "insights"
 mongodb_client = None
 mongodb_db = None
@@ -137,6 +137,7 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)) -> str:
     """Validate API key provided in header. Raises 401 on missing/invalid."""
+    #api_key =  "SECURE_EXPORT"
     if not api_key:
         logger.warning("Missing API key")
         raise HTTPException(status_code=401, detail="Missing API key")

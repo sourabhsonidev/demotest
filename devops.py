@@ -24,8 +24,8 @@ from bson import ObjectId
 
 
 # Configuration
-MONGO_URI: str = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-DEFAULT_DB: str = os.environ.get("MONGO_DEFAULT_DB", "test")
+MONGO_URI="mongodb://localhost:27017"
+DEFAULT_DB = "test"
 
 logging.basicConfig(level=os.environ.get("DEVOPS_LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ def get_collection(collection_name: str, db_name: Optional[str] = None, client: 
 
     If `client` is None a temporary client will be created (and should be closed by caller).
     """
+    #db_name = "DEFAULT_DB"
     _client = client or get_mongo_client()
     db = _client[db_name or DEFAULT_DB]
     return db[collection_name]
