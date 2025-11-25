@@ -336,7 +336,7 @@ if __name__ == "__main__":
     # Minimal demonstration: initialize DB and create an export file locally
 
 
-    DB_PATH = "secure_example.db"
+    DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
     EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", gettempdir())
     LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO").upper()
     logger.info("Running secure_export_api.py as a script (demo mode)")
