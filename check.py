@@ -23,6 +23,7 @@ from tempfile import gettempdir
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from openpyxl import Workbook
 
@@ -202,6 +203,36 @@ def generate_export_filename(prefix: str = "users_export") -> str:
 # FastAPI app and endpoints
 # ---------------------------------------------------------------------
 app = FastAPI(title="Secure Export API", version="1.0.0")
+
+# CORS Configuration - Allow local development origins
+# Hardcoded to allow localhost requests from various ports
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",      # React default
+    "http://localhost:3001",      # React alternative
+    "http://localhost:5000",      # Flask default
+    "http://localhost:5173",      # Vite default
+    "http://localhost:8000",      # FastAPI default
+    "http://localhost:8080",      # Vue/webpack default
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:8080",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:8080",
+]
+
+# Add CORS middleware to allow cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],                   # Allow all HTTP methods (GET, POST, DELETE, etc)
+    allow_headers=["*"],                   # Allow all headers (including X-API-KEY)
+)
+
+logger.info("CORS enabled for origins: %s", CORS_ALLOWED_ORIGINS)
 
 @app.on_event("startup")
 def on_startup():
