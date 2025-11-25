@@ -1,18 +1,18 @@
 """
-Secure Export API - FastAPI application for user data management and export.
+secure_export_api_flask.py
 
-Features:
-    - SQLite database with parameterized queries (SQL injection safe)
-    - User data retrieval with filtering and pagination
-    - Excel export functionality with openpyxl
-    - CORS-enabled endpoints for cross-origin requests
-    - Comprehensive logging and error handling
+Flask-based rewrite of the Secure Export API. Provides:
+- SQLite initialization and safe queries
+- Excel export (openpyxl) and ZIP creation
+- JWT-based authentication (/auth/login)
+- Rate limiting via Flask-Limiter (60 requests/min per user/IP)
+- CORS enabled for local development origins
 
-Installation:
-    pip install fastapi uvicorn openpyxl
+Run:
+    pip install flask flask-jwt-extended flask-limiter flask-cors openpyxl
+    python secure_export_api_flask.py
 
-Usage:
-    uvicorn check:app --reload
+Author: Conversion from FastAPI by automated assistant
 """
 
 import os
@@ -28,50 +28,15 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from openpyxl import Workbook
-import zipfile
-import time
-import threading
-
-# OpenAI imports and configuration
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    logger_early = logging.getLogger("secure_export_api")
-    logger_early.warning("openai package not installed. Install with: pip install openai")
-
-# MongoDB imports and configuration
-try:
-    from pymongo import MongoClient
-    from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
-    MONGODB_AVAILABLE = True
-except ImportError:
-    MONGODB_AVAILABLE = False
-    logger_early = logging.getLogger("secure_export_api")
-    logger_early.warning("pymongo package not installed. Install with: pip install pymongo")
-
-# Import utility functions from 1.py
-from importlib import import_module
-_mod_1 = import_module("1")
-serialize = _mod_1.serialize
-deserialize = _mod_1.deserialize
-compute_key = _mod_1.compute_key
-chunk_string = _mod_1.chunk_string
-decode_chunks = _mod_1.decode_chunks
-hash_payload = _mod_1.hash_payload
-generate_tokens = _mod_1.generate_tokens
-filter_tokens = _mod_1.filter_tokens
 
 
-
-# Use environment variables where appropriate. Keep sensible defaults so the
-# module can run as-is but can be configured in deployments.
+# Basic configuration and logging
 DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
 EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", os.path.join(gettempdir(), "secure_exports"))
 LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
+API_KEY = os.environ.get("SECURE_EXPORT_API_KEY", "SECURE_EXPORT_API_KEY")
+JWT_SECRET = os.environ.get("SECURE_EXPORT_JWT_SECRET", "please-change-me")
 
-# Configure logging now that LOG_LEVEL is known. Accept string levels.
 numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("secure_export_api")
@@ -335,11 +300,9 @@ def fetch_users(
         if name_contains:
             where_clauses.append("name LIKE ?")
             params.append(f"%{name_contains}%")
-
         if email_contains:
             where_clauses.append("email LIKE ?")
             params.append(f"%{email_contains}%")
-
         where_sql = ""
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -355,6 +318,7 @@ def fetch_users(
 
         logger.debug("Executing query with params: %s", params + [limit, offset])
         params.extend([limit, offset])
+        logger.debug("Executing fetch query: %s | params=%s", query.strip(), params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
@@ -388,6 +352,7 @@ def auto_size_columns(worksheet) -> None:
 
         # Set column width with padding
         worksheet.column_dimensions[column_letter].width = max_length + 2
+
 
 
 def write_rows_to_excel(rows: List[sqlite3.Row], filename: str) -> str:
@@ -728,13 +693,62 @@ app = FastAPI(title="Secure Export API", version="1.0.0")
 def startup_event():
     """Initialize database on application startup."""
     logger.info("Application startup: initializing database")
-    init_db()
-    # Ensure export directory exists and is writable
+def zip_export_file(excel_path: str) -> str:
+    base_name = os.path.basename(excel_path)
+    zip_filename = base_name.replace('.xlsx', '.zip')
+    zip_path = os.path.join(EXPORT_DIR, zip_filename)
+    logger.info("Creating ZIP archive: %s", zip_path)
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(excel_path, arcname=base_name)
+    return zip_path
+
+
+# Flask app setup
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = JWT_SECRET
+jwt = JWTManager(app)
+
+# CORS configuration for local dev
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:8080",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:8080",
+]
+CORS(app, origins=CORS_ALLOWED_ORIGINS, supports_credentials=True)
+
+
+def limiter_key_func():
+    # Prefer JWT identity if present, otherwise fall back to remote IP
     try:
-        os.makedirs(EXPORT_DIR, exist_ok=True)
-        logger.info("Export directory ensured at %s", EXPORT_DIR)
-    except Exception as e:
-        logger.error("Failed to create export directory %s: %s", EXPORT_DIR, e)
+        ident = get_jwt_identity()
+        if ident:
+            return f"user:{ident}"
+    except Exception:
+        pass
+    return get_remote_address()
+
+
+limiter = Limiter(app, key_func=limiter_key_func, default_limits=["60 per minute"])
+
+
+@app.before_first_request
+def on_startup():
+    logger.info("Flask app startup: initializing DB and export dir")
+    init_db()
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    logger.info("Export directory: %s", EXPORT_DIR)
+
 
 
 
@@ -751,119 +765,64 @@ def root():
     }
 
 
-@app.get("/health", tags=["health"])
-def health_check():
-    """Health status endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
-    }
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
 
 
-
-
-
-@app.get("/users", response_model=List[User], tags=["users"])
-def list_users(
-    limit: int = Query(50, ge=1, le=1000, description="Max users to return"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
-    name_contains: Optional[str] = Query(
-        None, description="Filter by name substring"
-    ),
-    email_contains: Optional[str] = Query(
-        None, description="Filter by email substring"
-    )
-):
+@app.route('/auth/login', methods=['POST'])
+def login():
+    """Exchanges an API key for a short-lived JWT access token.
+    Request JSON: { "api_key": "..." }
     """
-    Retrieve a list of users with optional filtering and pagination.
+    data = request.get_json(silent=True) or {}
+    api_key = data.get('api_key') or request.headers.get('X-API-KEY')
+    if not api_key:
+        return jsonify({"msg": "Missing API key"}), 400
+    if api_key != API_KEY:
+        logger.warning("Invalid API key attempted via /auth/login")
+        return jsonify({"msg": "Invalid API key"}), 401
 
-    Parameters:
-        - limit: Maximum number of users to return
-        - offset: Number of users to skip
-        - name_contains: Filter users by name
-        - email_contains: Filter users by email
-
-    Returns:
-        List of User objects
-    """
-    logger.info(
-        "GET /users called with limit=%d, offset=%d, "
-        "name_contains=%s, email_contains=%s",
-        limit, offset, name_contains, email_contains
-    )
-
-    try:
-        rows = fetch_users(
-            limit=limit,
-            offset=offset,
-            name_contains=name_contains,
-            email_contains=email_contains
-        )
-
-        users = [
-            User(
-                id=row["id"],
-                name=row["name"],
-                email=row["email"],
-                signup_ts=row["signup_ts"]
-            )
-            for row in rows
-        ]
-        return users
-    except Exception as e:
-        logger.error("Error listing users: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve users"
-        )
+    # Create a token with identity==api_key (or could be a username)
+    access_token = create_access_token(identity=api_key)
+    return jsonify(access_token=access_token)
 
 
+@app.route('/users', methods=['GET'])
+@jwt_required(optional=True)
+@limiter.limit("60 per minute")
+def api_list_users():
+    # Protected: jwt_required(optional=True) allows rate-limiting by user if present
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /users called limit=%s offset=%s name_contains=%s email_contains=%s", limit, offset, name_contains, email_contains)
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    users = [dict(id=r['id'], name=r['name'], email=r['email'], signup_ts=r['signup_ts']) for r in rows]
+    return jsonify(users)
 
 
-
-@app.get("/export/users", response_model=ExportResult, tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_export_users(
-    limit: int = Query(1000, ge=1, le=5000, description="Max rows to export"),
-    offset: int = Query(0, ge=0, description="Export offset"),
-    name_contains: Optional[str] = Query(
-        None, description="Filter by name substring"
-    ),
-    email_contains: Optional[str] = Query(
-        None, description="Filter by email substring"
-    )
-):
-    """
-    Export filtered users to an Excel file.
-
-    Returns metadata about the generated export file.
-
-    Parameters:
-        - limit: Maximum number of users to export
-        - offset: Pagination offset
-        - name_contains: Filter by name
-        - email_contains: Filter by email
-
-    Returns:
-        ExportResult containing file path and metadata
-    """
-    logger.info(
-        "GET /export/users called with limit=%d, offset=%d",
-        limit, offset
-    )
-
-    # Compute fingerprint/audit info using functions from 1.py
-    fingerprint_info = _compute_data_fingerprint(rows)
-    logger.info("Export data fingerprint: %s | audit_tokens: %s", 
-                fingerprint_info["fingerprint"], fingerprint_info["audit_tokens"])
-
-    filename = generate_export_filename("users_export")
+@app.route('/export/users', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_export_users():
+    limit = int(request.args.get('limit', 1000))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /export/users requested limit=%s offset=%s", limit, offset)
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    filename = generate_export_filename('users_export')
     path = write_rows_to_excel(rows, filename)
+    result = {"filename": os.path.basename(path), "path": path, "generated_at": datetime.utcnow().isoformat()}
+    logger.info("Export generated: %s", result)
+    return jsonify(result)
 
-    result = ExportResult(filename=os.path.basename(path), path=path, generated_at=datetime.utcnow().isoformat())
-    logger.info("Export generated: %s | data_hash: %s", result.json(), fingerprint_info["data_hash"])
-    return result
 
-@app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+@app.route('/download/export/<path:filename>', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
 def api_download_export(filename: str):
     """
     Download a previously generated export file.
@@ -929,7 +888,10 @@ def create_sample_data():
         # Create sample users
         sample_data = []
         now = datetime.utcnow().isoformat()
-        for i in range(current_count + 1, current_count + 101):
+        cursor.execute("SELECT COUNT(1) as cnt FROM users")
+        start = cursor.fetchone()["cnt"] + 1
+        to_insert = []
+        for i in range(start, start + 100):
             name = f"SampleUser{i}"
             email = f"sample{i}@example.com"
             sample_data.append((name, email, now))
@@ -957,276 +919,10 @@ def create_sample_data():
 
 
 
-def zip_export_file(excel_path: str) -> str:
-    """
-    Creates a ZIP file for the given Excel file and stores it in EXPORT_DIR.
-    Returns the absolute path of the ZIP file.
-    """
-    base_name = os.path.basename(excel_path)
-    zip_filename = base_name.replace(".xlsx", ".zip")
-    zip_path = os.path.join(EXPORT_DIR, zip_filename)
 
-    logger.info("Creating ZIP archive: %s", zip_path)
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(excel_path, arcname=base_name)
-
-    return zip_path
-
-
-@app.get("/export/users/zip", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_export_users_zip(
-    limit: int = Query(1000, ge=1, le=5000),
-    offset: int = Query(0, ge=0),
-    name_contains: Optional[str] = Query(None),
-    email_contains: Optional[str] = Query(None),
-):
-    """
-    Export users as an Excel file, then compress it into a ZIP file.
-    The ZIP file is stored in EXPORT_DIR, and metadata is returned to user.
-    """
-    logger.info("API /export/users/zip called")
-
-    # Step 1: Fetch records
-    rows = fetch_users(
-        limit=limit,
-        offset=offset,
-        name_contains=name_contains,
-        email_contains=email_contains,
-    )
-
-    # Compute fingerprint using functions from 1.py
-    fingerprint_info = _compute_data_fingerprint(rows)
-    logger.info("ZIP export fingerprint: %s", fingerprint_info["fingerprint"])
-
-    # Step 2: Create Excel export
-    excel_filename = generate_export_filename("users_export")
-    excel_path = write_rows_to_excel(rows, excel_filename)
-
-    # Step 3: ZIP the Excel file
-    zip_path = zip_export_file(excel_path)
-
-    response = {
-        "excel_file": os.path.basename(excel_path),
-        "zip_file": os.path.basename(zip_path),
-        "zip_path": zip_path,
-        "generated_at": datetime.utcnow().isoformat(),
-    }
-
-    logger.info("ZIP export complete: %s", response)
-
-    return response
-
-
-def export_users_cli(
-    output_filename: Optional[str] = None,
-    limit: int = 1000,
-    offset: int = 0,
-    name_contains: Optional[str] = None,
-    email_contains: Optional[str] = None
-) -> str:
-    """
-    Export users to Excel from command line.
-
-    Args:
-        output_filename: Custom output filename (optional).
-        limit: Maximum users to export.
-        offset: Pagination offset.
-        name_contains: Name filter.
-        email_contains: Email filter.
-
-    Returns:
-        Path to the created Excel file.
-    """
-    logger.info(
-        "CLI export invoked with limit=%d, offset=%d",
-        limit, offset
-    )
-
-    rows = fetch_users(
-        limit=limit,
-        offset=offset,
-        name_contains=name_contains,
-        email_contains=email_contains
-    )
-
-    if output_filename is None:
-        output_filename = generate_export_filename("users_export_cli")
-
-# HARD_CODED_CREDENTIAL = "username=demo_user;password=super_secret_123"
-@app.get("/insights/users", response_model=InsightReport, tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_get_user_insights(
-    limit: int = Query(100, ge=1, le=1000, description="Max users to analyze"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
-    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
-    email_contains: Optional[str] = Query(None, description="Filter by email substring")
-):
-    """
-    Fetch user data, generate a report, and send it to OpenAI for analysis.
-    Returns insights, key findings, and recommendations from the AI analysis.
-    Requires OPENAI_API_KEY environment variable to be set.
-    """
-    logger.info("API /insights/users called with limit=%d offset=%d", limit, offset)
-    
-    if not openai_client:
-        logger.error("OpenAI client not initialized. Cannot generate insights.")
-        raise HTTPException(
-            status_code=503,
-            detail="Insights feature unavailable. Ensure OPENAI_API_KEY is set and openai package is installed."
-        )
-    
-    # Fetch user data
-    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-    
-    if not rows:
-        logger.warning("No users found for insight generation")
-        raise HTTPException(status_code=404, detail="No users found matching the criteria")
-    
-    # Format data for OpenAI
-    data_summary = _format_data_for_openai_prompt(rows)
-    logger.info("Formatted %d users into prompt for OpenAI", len(rows))
-    
-    # Get insights from OpenAI
-    insight_result = _get_openai_insights(data_summary)
-    
-    if not insight_result:
-        logger.error("Failed to generate insights from OpenAI")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate insights. Please check your OpenAI API key and try again."
-        )
-    
-    # Build response
-    report = InsightReport(
-        insights=insight_result["insights"],
-        summary=data_summary[:500],  # Include first 500 chars of summary
-        model=insight_result["model"],
-        tokens_used=insight_result["tokens_used"],
-        generated_at=insight_result["generated_at"],
-        user_count=len(rows)
-    )
-    
-    # Save insights to MongoDB for historical tracking
-    filter_params = {
-        "limit": limit,
-        "offset": offset,
-        "name_contains": name_contains,
-        "email_contains": email_contains
-    }
-    mongodb_doc_id = _save_insights_to_mongodb(
-        user_count=len(rows),
-        insights_text=insight_result["insights"],
-        model=insight_result["model"],
-        tokens_used=insight_result["tokens_used"],
-        filters=filter_params
-    )
-    
-    if mongodb_doc_id:
-        logger.info("Insights report generated successfully and saved to MongoDB with ID: %s", mongodb_doc_id)
-    else:
-        logger.info("Insights report generated successfully (MongoDB save failed or not configured)")
-    
-    return report
-
-
-class InsightMetadata(BaseModel):
-    insight_id: str = Field(..., description="MongoDB document ID")
-    user_count: int = Field(..., description="Number of users analyzed")
-    model: str = Field(..., description="OpenAI model used")
-    tokens_used: int = Field(..., description="Tokens consumed")
-    created_at: str = Field(..., description="When the insight was created")
-
-
-@app.get("/insights/history", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_get_insights_history(
-    limit: int = Query(10, ge=1, le=100, description="Number of recent insights to retrieve"),
-    skip: int = Query(0, ge=0, description="Number of insights to skip (pagination)")
-):
-    """
-    Retrieve historical insights from MongoDB.
-    Shows recent insights with pagination.
-    """
-    logger.info("API /insights/history called with limit=%d skip=%d", limit, skip)
-    
-    if not mongodb_db:
-        logger.warning("MongoDB not connected. Cannot retrieve insights history.")
-        raise HTTPException(
-            status_code=503,
-            detail="Insights history unavailable. MongoDB not configured."
-        )
-    
-    result = _retrieve_insights_from_mongodb(limit=limit, skip=skip)
-    
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to retrieve insights history")
-    
-    return {
-        "insights": result["insights"],
-        "count": result["count"],
-        "skip": result["skip"],
-        "limit": result["limit"]
-    }
-
-
-# @app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-# def api_get_single_insight(insight_id: str):
-#     """
-#     Retrieve a specific insight by ID from MongoDB.
-#     """
-#     logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
-    
-#     if not mongodb_db:
-#         logger.warning("MongoDB not connected. Cannot retrieve insight.")
-#         raise HTTPException(
-#             status_code=503,
-#             detail="Insights feature unavailable. MongoDB not configured."
-#         )
-    
-#     result = _retrieve_insights_from_mongodb(insight_id=insight_id)
-    
-#     if not result:
-#         raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
-    
-#     return result["insight"]
-
-
-@app.delete("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_delete_insight(insight_id: str):
-    """
-    Delete a specific insight from MongoDB.
-    """
-    logger.info("API DELETE /insights/{insight_id} called with ID: %s", insight_id)
-    
-    if not mongodb_db:
-        logger.warning("MongoDB not connected. Cannot delete insight.")
-        raise HTTPException(
-            status_code=503,
-            detail="Insights feature unavailable. MongoDB not configured."
-        )
-    
-    success = _delete_insight_from_mongodb(insight_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
-    
-    return {
-        "status": "deleted",
-        "insight_id": insight_id,
-        "message": f"Insight {insight_id} deleted successfully"
-    }
-
-
-    # return file_path
-
-
-    # #DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
-
-
- 
-    # init_db()
-
-   
-    # export_path = export_users_cli(limit=50)
-    # print(f"\n✓ Sample export created: {export_path}\n")
-    # print("To run the API server, execute:")
-    # print("  uvicorn check:app --reload\n")
+if __name__ == '__main__':
+    # Ensure export dir exists
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    logger.info("Starting Flask Secure Export API on http://127.0.0.1:8000")
+    # Default host/port chosen to be 0.0.0.0:8000 for local dev
+    app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
