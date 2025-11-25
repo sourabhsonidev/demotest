@@ -39,6 +39,16 @@ except ImportError:
     logger_early = logging.getLogger("secure_export_api")
     logger_early.warning("openai package not installed. Install with: pip install openai")
 
+# MongoDB imports and configuration
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+    logger_early = logging.getLogger("secure_export_api")
+    logger_early.warning("pymongo package not installed. Install with: pip install pymongo")
+
 # Import utility functions from 1.py
 from importlib import import_module
 _mod_1 = import_module("1")
@@ -80,6 +90,39 @@ else:
         logger.warning("openai library not available. Install with: pip install openai")
     if not OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not set in environment. Insights feature disabled.")
+
+# MongoDB Configuration
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_DB = os.environ.get("MONGODB_DB", "secure_export")
+MONGODB_INSIGHTS_COLLECTION = "insights"
+mongodb_client = None
+mongodb_db = None
+
+if MONGODB_AVAILABLE:
+    try:
+        mongodb_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        # Test connection
+        mongodb_client.server_info()
+        mongodb_db = mongodb_client[MONGODB_DB]
+        logger.info("MongoDB connected successfully: %s", MONGODB_DB)
+        
+        # Create collections with TTL index if needed (insights auto-expire after 90 days)
+        insights_collection = mongodb_db[MONGODB_INSIGHTS_COLLECTION]
+        try:
+            insights_collection.create_index("created_at", expireAfterSeconds=7776000)  # 90 days
+            logger.info("MongoDB TTL index created for insights collection")
+        except:
+            pass  # Index may already exist
+    except (ServerSelectionTimeoutError, ConnectionFailure) as e:
+        logger.warning("MongoDB connection failed: %s. Insights will not be persisted.", str(e))
+        mongodb_client = None
+        mongodb_db = None
+    except Exception as e:
+        logger.error("Failed to initialize MongoDB: %s", e)
+        mongodb_client = None
+        mongodb_db = None
+else:
+    logger.warning("pymongo library not available. Install with: pip install pymongo")
 
 # Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
 # to secure the endpoints. Default is a placeholder and should be changed in
@@ -423,6 +466,126 @@ Please provide concise, actionable insights."""
         return None
 
 
+def _save_insights_to_mongodb(
+    user_count: int,
+    insights_text: str,
+    model: str,
+    tokens_used: int,
+    filters: dict = None
+) -> Optional[str]:
+    """
+    Save generated insights to MongoDB for historical tracking and analysis.
+    Returns the MongoDB document ID if successful, None otherwise.
+    """
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Insights will not be persisted.")
+        return None
+    
+    try:
+        insights_collection = mongodb_db[MONGODB_INSIGHTS_COLLECTION]
+        
+        # Prepare document
+        insight_doc = {
+            "user_count": user_count,
+            "insights": insights_text,
+            "model": model,
+            "tokens_used": tokens_used,
+            "filters": filters or {},
+            "created_at": datetime.utcnow(),
+            "status": "stored"
+        }
+        
+        # Insert into MongoDB
+        result = insights_collection.insert_one(insight_doc)
+        doc_id = str(result.inserted_id)
+        
+        logger.info("Insights saved to MongoDB with ID: %s", doc_id)
+        return doc_id
+    
+    except Exception as e:
+        logger.error("Failed to save insights to MongoDB: %s", str(e))
+        return None
+
+
+def _retrieve_insights_from_mongodb(
+    insight_id: str = None,
+    limit: int = 10,
+    skip: int = 0
+) -> Optional[dict]:
+    """
+    Retrieve insights from MongoDB.
+    If insight_id provided, returns single document.
+    Otherwise returns list of recent insights with pagination.
+    """
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot retrieve insights.")
+        return None
+    
+    try:
+        insights_collection = mongodb_db[MONGODB_INSIGHTS_COLLECTION]
+        
+        if insight_id:
+            # Retrieve single insight by ID
+            from bson.objectid import ObjectId
+            try:
+                doc = insights_collection.find_one({"_id": ObjectId(insight_id)})
+                if doc:
+                    doc["_id"] = str(doc["_id"])
+                    return {"insight": doc}
+                else:
+                    return None
+            except:
+                return None
+        else:
+            # Retrieve recent insights with pagination
+            docs = list(insights_collection.find()
+                       .sort("created_at", -1)
+                       .skip(skip)
+                       .limit(limit))
+            
+            # Convert ObjectId to string
+            for doc in docs:
+                doc["_id"] = str(doc["_id"])
+            
+            return {
+                "insights": docs,
+                "count": len(docs),
+                "skip": skip,
+                "limit": limit
+            }
+    
+    except Exception as e:
+        logger.error("Failed to retrieve insights from MongoDB: %s", str(e))
+        return None
+
+
+def _delete_insight_from_mongodb(insight_id: str) -> bool:
+    """
+    Delete a specific insight record from MongoDB.
+    Returns True if successful, False otherwise.
+    """
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot delete insights.")
+        return False
+    
+    try:
+        insights_collection = mongodb_db[MONGODB_INSIGHTS_COLLECTION]
+        from bson.objectid import ObjectId
+        
+        result = insights_collection.delete_one({"_id": ObjectId(insight_id)})
+        
+        if result.deleted_count > 0:
+            logger.info("Insight %s deleted from MongoDB", insight_id)
+            return True
+        else:
+            logger.warning("Insight %s not found in MongoDB", insight_id)
+            return False
+    
+    except Exception as e:
+        logger.error("Failed to delete insight from MongoDB: %s", str(e))
+        return False
+
+
 def generate_export_filename(prefix: str = "users_export") -> str:
     """
     Create a timestamped filename under EXPORT_DIR and return it (not full path).
@@ -686,8 +849,114 @@ def api_get_user_insights(
         user_count=len(rows)
     )
     
-    logger.info("Insights report generated successfully with %d tokens used", insight_result["tokens_used"])
+    # Save insights to MongoDB for historical tracking
+    filter_params = {
+        "limit": limit,
+        "offset": offset,
+        "name_contains": name_contains,
+        "email_contains": email_contains
+    }
+    mongodb_doc_id = _save_insights_to_mongodb(
+        user_count=len(rows),
+        insights_text=insight_result["insights"],
+        model=insight_result["model"],
+        tokens_used=insight_result["tokens_used"],
+        filters=filter_params
+    )
+    
+    if mongodb_doc_id:
+        logger.info("Insights report generated successfully and saved to MongoDB with ID: %s", mongodb_doc_id)
+    else:
+        logger.info("Insights report generated successfully (MongoDB save failed or not configured)")
+    
     return report
+
+
+class InsightMetadata(BaseModel):
+    insight_id: str = Field(..., description="MongoDB document ID")
+    user_count: int = Field(..., description="Number of users analyzed")
+    model: str = Field(..., description="OpenAI model used")
+    tokens_used: int = Field(..., description="Tokens consumed")
+    created_at: str = Field(..., description="When the insight was created")
+
+
+@app.get("/insights/history", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+def api_get_insights_history(
+    limit: int = Query(10, ge=1, le=100, description="Number of recent insights to retrieve"),
+    skip: int = Query(0, ge=0, description="Number of insights to skip (pagination)")
+):
+    """
+    Retrieve historical insights from MongoDB.
+    Shows recent insights with pagination.
+    """
+    logger.info("API /insights/history called with limit=%d skip=%d", limit, skip)
+    
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot retrieve insights history.")
+        raise HTTPException(
+            status_code=503,
+            detail="Insights history unavailable. MongoDB not configured."
+        )
+    
+    result = _retrieve_insights_from_mongodb(limit=limit, skip=skip)
+    
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to retrieve insights history")
+    
+    return {
+        "insights": result["insights"],
+        "count": result["count"],
+        "skip": result["skip"],
+        "limit": result["limit"]
+    }
+
+
+@app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+def api_get_single_insight(insight_id: str):
+    """
+    Retrieve a specific insight by ID from MongoDB.
+    """
+    logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
+    
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot retrieve insight.")
+        raise HTTPException(
+            status_code=503,
+            detail="Insights feature unavailable. MongoDB not configured."
+        )
+    
+    result = _retrieve_insights_from_mongodb(insight_id=insight_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
+    
+    return result["insight"]
+
+
+@app.delete("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+def api_delete_insight(insight_id: str):
+    """
+    Delete a specific insight from MongoDB.
+    """
+    logger.info("API DELETE /insights/{insight_id} called with ID: %s", insight_id)
+    
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot delete insight.")
+        raise HTTPException(
+            status_code=503,
+            detail="Insights feature unavailable. MongoDB not configured."
+        )
+    
+    success = _delete_insight_from_mongodb(insight_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
+    
+    return {
+        "status": "deleted",
+        "insight_id": insight_id,
+        "message": f"Insight {insight_id} deleted successfully"
+    }
 
 
 if __name__ == "__main__":
