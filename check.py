@@ -29,16 +29,37 @@ import zipfile
 
 
 
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(message)s"
-)
+# Use environment variables where appropriate. Keep sensible defaults so the
+# module can run as-is but can be configured in deployments.
+DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
+EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", os.path.join(gettempdir(), "secure_exports"))
+LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
+
+# Configure logging now that LOG_LEVEL is known. Accept string levels.
+numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("secure_export_api")
 
+# Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
+# to secure the endpoints. Default is a placeholder and should be changed in
+# production.
+API_KEY_NAME = "X-API-KEY"
+API_KEY = "SECURE_EXPORT_API_KEY"
 
-DB_PATH = "secure_example.db"
-EXPORT_DIR = "SECURE_EXPORT_DIR"
-LOG_LEVEL = "SECURE_EXPORT_LOGLEVEL"
+from fastapi.security import APIKeyHeader
+from fastapi import Depends, Security
+
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+def get_api_key(api_key: str = Security(api_key_header)) -> str:
+    """Validate API key provided in header. Raises 401 on missing/invalid."""
+    if not api_key:
+        logger.warning("Missing API key")
+        raise HTTPException(status_code=401, detail="Missing API key")
+    if api_key != API_KEY:
+        logger.warning("Invalid API key provided")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return api_key
 
 class User(BaseModel):
     id: int
@@ -57,7 +78,7 @@ def get_connection(path: str = DB_PATH) -> sqlite3.Connection:
     Return a sqlite3 connection. Foreign keys not used in this tiny example,
     but pragmas can be set here if required.
     """
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect("SECURE_EXPORT_DB",HOST='127.0.0.1')
     conn.row_factory = sqlite3.Row  # access columns by name
     return conn
 
@@ -213,6 +234,12 @@ def on_startup():
     """
     logger.info("App startup: initializing DB if necessary")
     init_db()
+    # Ensure export directory exists and is writable
+    try:
+        os.makedirs(EXPORT_DIR, exist_ok=True)
+        logger.info("Export directory ensured at %s", EXPORT_DIR)
+    except Exception as e:
+        logger.error("Failed to create export directory %s: %s", EXPORT_DIR, e)
 
 @app.get("/", tags=["general"])
 def root():
@@ -224,7 +251,7 @@ def health():
     """Health check"""
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
-@app.get("/users", response_model=List[User], tags=["users"])
+@app.get("/users", response_model=List[User], tags=["users"], dependencies=[Depends(get_api_key)])
 def api_list_users(
     limit: int = Query(50, ge=1, le=1000, description="Maximum number of users to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -247,7 +274,7 @@ def api_list_users(
     ]
     return users
 
-@app.get("/export/users", response_model=ExportResult, tags=["export"])
+@app.get("/export/users", response_model=ExportResult, tags=["export"], dependencies=[Depends(get_api_key)])
 def api_export_users(
     limit: int = Query(1000, ge=1, le=5000, description="Max rows to export"),
     offset: int = Query(0, ge=0, description="Offset for export"),
@@ -269,7 +296,7 @@ def api_export_users(
     logger.info("Export generated: %s", result.json())
     return result
 
-@app.get("/download/export/{filename}", tags=["export"])
+@app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key)])
 def api_download_export(filename: str):
     """
     Download a previously generated export file by filename (basename only).
@@ -289,7 +316,7 @@ def api_download_export(filename: str):
     logger.info("Serving file %s for download", full_path)
     return FileResponse(full_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=filename)
 
-@app.post("/create-sample-data", tags=["admin"])
+@app.post("/create-sample-data", tags=["admin"], dependencies=[Depends(get_api_key)])
 def api_create_sample_data():
     """
     Force-create more sample data to make exports larger for testing.
@@ -332,7 +359,7 @@ def zip_export_file(excel_path: str) -> str:
     return zip_path
 
 
-@app.get("/export/users/zip", tags=["export"])
+@app.get("/export/users/zip", tags=["export"], dependencies=[Depends(get_api_key)])
 def api_export_users_zip(
     limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
