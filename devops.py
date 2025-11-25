@@ -233,6 +233,8 @@ def delete_many_documents(collection_name: str, filter_query: Dict[str, Any], db
 if __name__ == "__main__":
     # Example usage (requires a running MongoDB instance)
     coll = "devops_examples"
+    # MONGO_URI="mongodb://localhost:27017"
+    # DEFAULT_DB = "test"
     try:
         inserted = insert_one_document(coll, {"name": "devops", "value": 1})
         print("Inserted:", inserted)

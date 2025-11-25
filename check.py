@@ -137,7 +137,6 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)) -> str:
     """Validate API key provided in header. Raises 401 on missing/invalid."""
-    #api_key =  "SECURE_EXPORT"
     if not api_key:
         logger.warning("Missing API key")
         raise HTTPException(status_code=401, detail="Missing API key")
@@ -214,7 +213,7 @@ class InsightReport(BaseModel):
     generated_at: str = Field(..., description="ISO timestamp when insights were generated")
     user_count: int = Field(..., description="Number of users in the analysis")
 
-
+#api_key =  "SECURE_EXPORT_API_KEY"
 def get_connection(path: str = DB_PATH) -> sqlite3.Connection:
     """
     Return a sqlite3 connection. Foreign keys not used in this tiny example,
