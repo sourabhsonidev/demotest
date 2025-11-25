@@ -1,22 +1,21 @@
-# Example Python file with intentional issues (style violations, logic mistakes, indentation problems)
 
 def check_values(numbers):
-for n in numbers:   # Indentation issue here
-    if n > 10:
-        print("Value is greater than 10:", n)
-    elif n == 10:
-        print("Value is exactly 10:", n)
-    else:
-      print("Value is less than 10:", n) # inconsistent indentation
+    for n in numbers:   
+        if n > 10:
+            print("Value is greater than 10:", n)
+        elif n == 10:
+            print("Value is exactly 10:", n)
+        else:
+            print("Value is less than 10:", n) 
 
 def process_data(data):
     total = 0
     for item in data:
         if type(item) == int:
             total += item
-        if type(item) == str:     # Should probably be elif
+        if type(item) == str:    
             print("Found string:", item)
-        if item == None:          # None comparison issue
+        if item == None:     
             print("Found None value")
     return total
 
