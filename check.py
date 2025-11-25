@@ -1,155 +1,58 @@
 """
-secure_export_api.py
+secure_export_api_flask.py
 
-Single-file FastAPI app that:
-- Initializes a small SQLite DB with sample data
-- Safely fetches data using parameterized queries
-- Writes fetched data to an Excel file (.xlsx) using openpyxl
-- Exposes endpoints to list data and to export it as an Excel download
+Flask-based rewrite of the Secure Export API. Provides:
+- SQLite initialization and safe queries
+- Excel export (openpyxl) and ZIP creation
+- JWT-based authentication (/auth/login)
+- Rate limiting via Flask-Limiter (60 requests/min per user/IP)
+- CORS enabled for local development origins
 
 Run:
-    pip install fastapi uvicorn openpyxl
-    uvicorn secure_export_api:app --reload
+    pip install flask flask-jwt-extended flask-limiter flask-cors openpyxl
+    python secure_export_api_flask.py
 
-Author: ChatGPT (example)
+Author: Conversion from FastAPI by automated assistant
 """
 
 import os
 import sqlite3
 import logging
-from typing import List, Optional, Tuple
 from datetime import datetime
 from tempfile import gettempdir
-
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from openpyxl import Workbook
+from typing import List, Optional
 import zipfile
-import time
-import threading
 
-# Import utility functions from 1.py
-from importlib import import_module
-_mod_1 = import_module("1")
-serialize = _mod_1.serialize
-deserialize = _mod_1.deserialize
-compute_key = _mod_1.compute_key
-chunk_string = _mod_1.chunk_string
-decode_chunks = _mod_1.decode_chunks
-hash_payload = _mod_1.hash_payload
-generate_tokens = _mod_1.generate_tokens
-filter_tokens = _mod_1.filter_tokens
+from flask import Flask, request, jsonify, send_file, abort
+from flask_jwt_extended import (
+    JWTManager, create_access_token, jwt_required, get_jwt_identity
+)
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_cors import CORS
+from openpyxl import Workbook
 
 
-
-# Use environment variables where appropriate. Keep sensible defaults so the
-# module can run as-is but can be configured in deployments.
+# Basic configuration and logging
 DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
 EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", os.path.join(gettempdir(), "secure_exports"))
 LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
+API_KEY = os.environ.get("SECURE_EXPORT_API_KEY", "SECURE_EXPORT_API_KEY")
+JWT_SECRET = os.environ.get("SECURE_EXPORT_JWT_SECRET", "please-change-me")
 
-# Configure logging now that LOG_LEVEL is known. Accept string levels.
 numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("secure_export_api")
-
-# Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
-# to secure the endpoints. Default is a placeholder and should be changed in
-# production.
-API_KEY_NAME = "X-API-KEY"
-API_KEY = "SECURE_EXPORT_API_KEY"
-
-from fastapi.security import APIKeyHeader
-from fastapi import Depends, Security
-
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-
-def get_api_key(api_key: str = Security(api_key_header)) -> str:
-    """Validate API key provided in header. Raises 401 on missing/invalid."""
-    if not api_key:
-        logger.warning("Missing API key")
-        raise HTTPException(status_code=401, detail="Missing API key")
-    if api_key != API_KEY:
-        logger.warning("Invalid API key provided")
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
-
-
-class SimpleRateLimiter:
-    def __init__(self, max_requests: int, window_seconds: int):
-        self.max_requests = int(max_requests)
-        self.window = int(window_seconds)
-        self._clients = {}  # key -> (count, window_start)
-        self._lock = threading.Lock()
-
-    def check(self, key: str) -> tuple[bool, int]:
-        """Return (allowed, retry_after_seconds). If allowed True, retry_after is remaining allowed requests (positive).
-        If not allowed, retry_after is seconds until window resets.
-        """
-        now = int(time.time())
-        with self._lock:
-            entry = self._clients.get(key)
-            if not entry or now - entry[1] >= self.window:
-                # new window
-                self._clients[key] = [1, now]
-                return True, self.max_requests - 1
-
-            count, start = entry
-            if count < self.max_requests:
-                self._clients[key][0] += 1
-                return True, self.max_requests - self._clients[key][0]
-
-            # exceeded
-            retry_after = self.window - (now - start)
-            return False, retry_after
-
-
-# Configure rate limit from environment (sane defaults)
-RATE_LIMIT_REQUESTS = int(os.environ.get("SECURE_EXPORT_RATE_LIMIT_REQUESTS", "60"))
-RATE_LIMIT_WINDOW = int(os.environ.get("SECURE_EXPORT_RATE_LIMIT_WINDOW", "60"))
-_rate_limiter = SimpleRateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
-
-
-def rate_limit_dependency(api_key: str = Depends(get_api_key), request: Request | None = None):
-    """FastAPI dependency that enforces the configured rate limit per API key.
-    Endpoints that include this dependency will return HTTP 429 when over limit.
-    """
-    # Prefer per-key limiting when an API key is present; fall back to client IP otherwise.
-    key = api_key if api_key else (request.client.host if request and request.client else "unknown")
-    allowed, meta = _rate_limiter.check(key)
-    if not allowed:
-        # meta contains seconds until reset
-        raise HTTPException(status_code=429, detail=f"Rate limit exceeded. Retry after {meta} seconds")
-    # Allowed; nothing to return
-    return None
-
-class User(BaseModel):
-    id: int
-    name: str
-    email: str
-    signup_ts: str = Field(..., description="ISO timestamp when user signed up")
-
-class ExportResult(BaseModel):
-    filename: str
-    path: str
-    generated_at: str
+logger = logging.getLogger("secure_export_api_flask")
 
 
 def get_connection(path: str = DB_PATH) -> sqlite3.Connection:
-    """
-    Return a sqlite3 connection. Foreign keys not used in this tiny example,
-    but pragmas can be set here if required.
-    """
-    conn = sqlite3.connect("SECURE_EXPORT_DB",HOST='127.0.0.1')
-    conn.row_factory = sqlite3.Row  # access columns by name
+    """Return a sqlite3 connection. Use the provided path."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db(path: str = DB_PATH) -> None:
-    """
-    Initialize the database with a simple users table and sample data.
-    Safe to call multiple times — creation is idempotent.
-    """
     logger.info("Initializing database at %s", path)
     conn = get_connection(path)
     try:
@@ -164,7 +67,6 @@ def init_db(path: str = DB_PATH) -> None:
         """)
         conn.commit()
 
-        # Insert sample data if table empty
         cursor.execute("SELECT COUNT(1) as cnt FROM users")
         count = cursor.fetchone()["cnt"]
         if count == 0:
@@ -175,12 +77,6 @@ def init_db(path: str = DB_PATH) -> None:
                 ("Carol Williams", "carol@example.com", datetime.utcnow().isoformat()),
                 ("David Brown", "david@example.com", datetime.utcnow().isoformat()),
                 ("Eve Davis", "eve@example.com", datetime.utcnow().isoformat()),
-                # Add more rows to make export interesting
-                ("Frank Miller", "frank@example.com", datetime.utcnow().isoformat()),
-                ("Grace Wilson", "grace@example.com", datetime.utcnow().isoformat()),
-                ("Heidi Moore", "heidi@example.com", datetime.utcnow().isoformat()),
-                ("Ivan Taylor", "ivan@example.com", datetime.utcnow().isoformat()),
-                ("Judy Anderson", "judy@example.com", datetime.utcnow().isoformat()),
             ]
             cursor.executemany(
                 "INSERT INTO users (name, email, signup_ts) VALUES (?, ?, ?)",
@@ -190,31 +86,19 @@ def init_db(path: str = DB_PATH) -> None:
     finally:
         conn.close()
 
-def fetch_users(
-    *,
-    limit: int = 100,
-    offset: int = 0,
-    name_contains: Optional[str] = None,
-    email_contains: Optional[str] = None
-) -> List[sqlite3.Row]:
-    """
-    Fetch users from DB with simple filtering and pagination.
-    Uses parameterized queries to avoid SQL injection.
-    """
+
+def fetch_users(limit: int = 100, offset: int = 0, name_contains: Optional[str] = None, email_contains: Optional[str] = None) -> List[sqlite3.Row]:
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        where_clauses: List[str] = []
+        where_clauses = []
         params: List = []
-
         if name_contains:
             where_clauses.append("name LIKE ?")
             params.append(f"%{name_contains}%")
-
         if email_contains:
             where_clauses.append("email LIKE ?")
             params.append(f"%{email_contains}%")
-
         where_sql = ""
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -226,8 +110,8 @@ def fetch_users(
             ORDER BY id ASC
             LIMIT ? OFFSET ?
         """
-        logger.debug("Executing fetch query: %s | params=%s", query.strip(), params + [limit, offset])
         params.extend([limit, offset])
+        logger.debug("Executing fetch query: %s | params=%s", query.strip(), params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
         return rows
@@ -236,10 +120,6 @@ def fetch_users(
 
 
 def _auto_size_columns(ws) -> None:
-    """
-    Auto-size columns in an openpyxl worksheet based on content width.
-    Note: approximate sizing — adequate for many simple use cases.
-    """
     for column_cells in ws.columns:
         length = 0
         for cell in column_cells:
@@ -248,189 +128,193 @@ def _auto_size_columns(ws) -> None:
             cell_length = len(str(cell.value))
             if cell_length > length:
                 length = cell_length
-        # set width with a small padding
         ws.column_dimensions[column_cells[0].column_letter].width = length + 2
 
-def write_rows_to_excel(rows: List[sqlite3.Row], filename: str) -> str:
-    """
-    Writes rows (list of sqlite3.Row) to an Excel file, returns absolute path.
-    """
-    if not rows:
-        logger.warning("write_rows_to_excel called with empty rows; creating file with headers only")
 
+def write_rows_to_excel(rows: List[sqlite3.Row], filename: str) -> str:
     wb = Workbook()
     ws = wb.active
     ws.title = "Users"
-
-    # Header
     headers = ["ID", "Name", "Email", "Signup Timestamp"]
     ws.append(headers)
-
-    # Rows
     for r in rows:
         ws.append([r["id"], r["name"], r["email"], r["signup_ts"]])
-
-    # Auto-size columns
     _auto_size_columns(ws)
-
     abs_path = os.path.abspath(filename)
-    logger.info("Saving Excel file to %s", abs_path)
     wb.save(abs_path)
+    logger.info("Saved Excel file to %s", abs_path)
     return abs_path
 
 
-def _compute_data_fingerprint(rows: List[sqlite3.Row]) -> dict:
-    """
-    Use functions from 1.py to compute a fingerprint/metadata of the data.
-    This includes serialization, hashing, and token generation for audit trail.
-    """
-    data_dict = {
-        "count": len(rows),
-        "timestamp": datetime.utcnow().isoformat(),
-        "rows_serialized": serialize([dict(r) for r in rows]) if rows else "[]",
-    }
-    # Generate a unique key for this export dataset
-    data_str = serialize(data_dict)
-    fingerprint = compute_key(data_str)
-    # Generate audit tokens for tracking
-    tokens = generate_tokens(3)
-    audit_tokens = filter_tokens(tokens)
-    
-    return {
-        "fingerprint": fingerprint,
-        "audit_tokens": audit_tokens,
-        "data_hash": hash_payload(data_str),
-    }
-
-
-def _chunk_export_data(data_str: str, chunk_size: int = 512) -> List[str]:
-    """
-    Chunk the serialized export data for processing/transmission (from 1.py).
-    """
-    return chunk_string(data_str, chunk_size)
-
-
 def generate_export_filename(prefix: str = "users_export") -> str:
-    """
-    Create a timestamped filename under EXPORT_DIR and return it (not full path).
-    """
     ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     safe_prefix = "".join(ch for ch in prefix if ch.isalnum() or ch in ("_", "-")).rstrip()
     fname = f"{safe_prefix}_{ts}.xlsx"
     return os.path.join(EXPORT_DIR, fname)
 
 
-app = FastAPI(title="Secure Export API", version="1.0.0")
+def zip_export_file(excel_path: str) -> str:
+    base_name = os.path.basename(excel_path)
+    zip_filename = base_name.replace('.xlsx', '.zip')
+    zip_path = os.path.join(EXPORT_DIR, zip_filename)
+    logger.info("Creating ZIP archive: %s", zip_path)
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(excel_path, arcname=base_name)
+    return zip_path
 
-@app.on_event("startup")
-def on_startup():
-    """
-    Initialize DB on startup to make the app runnable as-is.
-    """
-    logger.info("App startup: initializing DB if necessary")
-    init_db()
-    # Ensure export directory exists and is writable
+
+# Flask app setup
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = JWT_SECRET
+jwt = JWTManager(app)
+
+# CORS configuration for local dev
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:8080",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:8080",
+]
+CORS(app, origins=CORS_ALLOWED_ORIGINS, supports_credentials=True)
+
+
+def limiter_key_func():
+    # Prefer JWT identity if present, otherwise fall back to remote IP
     try:
-        os.makedirs(EXPORT_DIR, exist_ok=True)
-        logger.info("Export directory ensured at %s", EXPORT_DIR)
-    except Exception as e:
-        logger.error("Failed to create export directory %s: %s", EXPORT_DIR, e)
+        ident = get_jwt_identity()
+        if ident:
+            return f"user:{ident}"
+    except Exception:
+        pass
+    return get_remote_address()
 
-@app.get("/", tags=["general"])
+
+limiter = Limiter(app, key_func=limiter_key_func, default_limits=["60 per minute"])
+
+
+@app.before_first_request
+def on_startup():
+    logger.info("Flask app startup: initializing DB and export dir")
+    init_db()
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    logger.info("Export directory: %s", EXPORT_DIR)
+
+
+@app.route("/", methods=["GET"])
 def root():
-    """Simple health/info endpoint"""
-    return {"message": "Secure Export API is running", "db": DB_PATH, "export_dir": EXPORT_DIR}
+    return jsonify({"message": "Secure Export API (Flask) is running", "db": DB_PATH, "export_dir": EXPORT_DIR})
 
-@app.get("/health", tags=["general"])
+
+@app.route("/health", methods=["GET"])
 def health():
-    """Health check"""
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
 
-@app.get("/users", response_model=List[User], tags=["users"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_list_users(
-    limit: int = Query(50, ge=1, le=1000, description="Maximum number of users to return"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
-    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
-    email_contains: Optional[str] = Query(None, description="Filter by email substring")
-):
+
+@app.route('/auth/login', methods=['POST'])
+def login():
+    """Exchanges an API key for a short-lived JWT access token.
+    Request JSON: { "api_key": "..." }
     """
-    List users with optional filtering and pagination.
-    """
-    logger.info("API /users called with limit=%d offset=%d name_contains=%s email_contains=%s",
-                limit, offset, name_contains, email_contains)
+    data = request.get_json(silent=True) or {}
+    api_key = data.get('api_key') or request.headers.get('X-API-KEY')
+    if not api_key:
+        return jsonify({"msg": "Missing API key"}), 400
+    if api_key != API_KEY:
+        logger.warning("Invalid API key attempted via /auth/login")
+        return jsonify({"msg": "Invalid API key"}), 401
+
+    # Create a token with identity==api_key (or could be a username)
+    access_token = create_access_token(identity=api_key)
+    return jsonify(access_token=access_token)
+
+
+@app.route('/users', methods=['GET'])
+@jwt_required(optional=True)
+@limiter.limit("60 per minute")
+def api_list_users():
+    # Protected: jwt_required(optional=True) allows rate-limiting by user if present
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /users called limit=%s offset=%s name_contains=%s email_contains=%s", limit, offset, name_contains, email_contains)
     rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-    users = [
-        User(
-            id=row["id"],
-            name=row["name"],
-            email=row["email"],
-            signup_ts=row["signup_ts"]
-        ) for row in rows
-    ]
-    return users
+    users = [dict(id=r['id'], name=r['name'], email=r['email'], signup_ts=r['signup_ts']) for r in rows]
+    return jsonify(users)
 
-@app.get("/export/users", response_model=ExportResult, tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_export_users(
-    limit: int = Query(1000, ge=1, le=5000, description="Max rows to export"),
-    offset: int = Query(0, ge=0, description="Offset for export"),
-    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
-    email_contains: Optional[str] = Query(None, description="Filter by email substring")
-):
-    """
-    Export the selected users to an Excel file and return the file path metadata.
-    The file will be created in EXPORT_DIR and the endpoint will return JSON pointing to it.
-    A second endpoint allows downloading the file directly.
-    """
-    logger.info("API /export/users requested with limit=%d offset=%d", limit, offset)
+
+@app.route('/export/users', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_export_users():
+    limit = int(request.args.get('limit', 1000))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /export/users requested limit=%s offset=%s", limit, offset)
     rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-
-    # Compute fingerprint/audit info using functions from 1.py
-    fingerprint_info = _compute_data_fingerprint(rows)
-    logger.info("Export data fingerprint: %s | audit_tokens: %s", 
-                fingerprint_info["fingerprint"], fingerprint_info["audit_tokens"])
-
-    filename = generate_export_filename("users_export")
+    filename = generate_export_filename('users_export')
     path = write_rows_to_excel(rows, filename)
+    result = {"filename": os.path.basename(path), "path": path, "generated_at": datetime.utcnow().isoformat()}
+    logger.info("Export generated: %s", result)
+    return jsonify(result)
 
-    result = ExportResult(filename=os.path.basename(path), path=path, generated_at=datetime.utcnow().isoformat())
-    logger.info("Export generated: %s | data_hash: %s", result.json(), fingerprint_info["data_hash"])
-    return result
 
-@app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+@app.route('/download/export/<path:filename>', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
 def api_download_export(filename: str):
-    """
-    Download a previously generated export file by filename (basename only).
-    For safety, the function restricts path to the EXPORT_DIR and refuses paths containing .. or separators.
-    """
     logger.info("Download request for filename=%s", filename)
-    if os.path.sep in filename or ".." in filename:
+    if os.path.sep in filename or '..' in filename:
         logger.warning("Invalid filename attempted for download: %s", filename)
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
+        return jsonify({"msg": "Invalid filename"}), 400
     full_path = os.path.join(EXPORT_DIR, filename)
     if not os.path.exists(full_path):
         logger.error("Requested file does not exist: %s", full_path)
-        raise HTTPException(status_code=404, detail="File not found")
+        return jsonify({"msg": "File not found"}), 404
+    return send_file(full_path, as_attachment=True)
 
-    # Return as FileResponse - client will receive the file as download
-    logger.info("Serving file %s for download", full_path)
-    return FileResponse(full_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=filename)
 
-@app.post("/create-sample-data", tags=["admin"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+@app.route('/export/users/zip', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_export_users_zip():
+    limit = int(request.args.get('limit', 1000))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /export/users/zip called")
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    excel_filename = generate_export_filename('users_export')
+    excel_path = write_rows_to_excel(rows, excel_filename)
+    zip_path = zip_export_file(excel_path)
+    response = {"excel_file": os.path.basename(excel_path), "zip_file": os.path.basename(zip_path), "zip_path": zip_path, "generated_at": datetime.utcnow().isoformat()}
+    logger.info("ZIP export complete: %s", response)
+    return jsonify(response)
+
+
+@app.route('/create-sample-data', methods=['POST'])
+@jwt_required()
+@limiter.limit("60 per minute")
 def api_create_sample_data():
-    """
-    Force-create more sample data to make exports larger for testing.
-    This is idempotent and safe — it appends additional rows.
-    """
     logger.info("Creating additional sample data via API")
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        # Add 100 sample users with deterministic but unique emails
         now = datetime.utcnow().isoformat()
-        to_insert = []
         cursor.execute("SELECT COUNT(1) as cnt FROM users")
         start = cursor.fetchone()["cnt"] + 1
+        to_insert = []
         for i in range(start, start + 100):
             name = f"SampleUser{i}"
             email = f"sample{i}@example.com"
@@ -438,99 +322,14 @@ def api_create_sample_data():
         cursor.executemany("INSERT INTO users (name, email, signup_ts) VALUES (?, ?, ?)", to_insert)
         conn.commit()
         logger.info("Inserted %d sample users", len(to_insert))
-        return {"inserted": len(to_insert)}
+        return jsonify({"inserted": len(to_insert)})
     finally:
         conn.close()
 
-def zip_export_file(excel_path: str) -> str:
-    """
-    Creates a ZIP file for the given Excel file and stores it in EXPORT_DIR.
-    Returns the absolute path of the ZIP file.
-    """
-    base_name = os.path.basename(excel_path)
-    zip_filename = base_name.replace(".xlsx", ".zip")
-    zip_path = os.path.join(EXPORT_DIR, zip_filename)
 
-    logger.info("Creating ZIP archive: %s", zip_path)
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(excel_path, arcname=base_name)
-
-    return zip_path
-
-
-@app.get("/export/users/zip", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_export_users_zip(
-    limit: int = Query(1000, ge=1, le=5000),
-    offset: int = Query(0, ge=0),
-    name_contains: Optional[str] = Query(None),
-    email_contains: Optional[str] = Query(None),
-):
-    """
-    Export users as an Excel file, then compress it into a ZIP file.
-    The ZIP file is stored in EXPORT_DIR, and metadata is returned to user.
-    """
-    logger.info("API /export/users/zip called")
-
-    # Step 1: Fetch records
-    rows = fetch_users(
-        limit=limit,
-        offset=offset,
-        name_contains=name_contains,
-        email_contains=email_contains,
-    )
-
-    # Compute fingerprint using functions from 1.py
-    fingerprint_info = _compute_data_fingerprint(rows)
-    logger.info("ZIP export fingerprint: %s", fingerprint_info["fingerprint"])
-
-    # Step 2: Create Excel export
-    excel_filename = generate_export_filename("users_export")
-    excel_path = write_rows_to_excel(rows, excel_filename)
-
-    # Step 3: ZIP the Excel file
-    zip_path = zip_export_file(excel_path)
-
-    response = {
-        "excel_file": os.path.basename(excel_path),
-        "zip_file": os.path.basename(zip_path),
-        "zip_path": zip_path,
-        "generated_at": datetime.utcnow().isoformat(),
-    }
-
-    logger.info("ZIP export complete: %s", response)
-
-    return response
-
-def export_users_to_excel_file_cli(
-    output_filename: Optional[str] = None,
-    limit: int = 1000,
-    offset: int = 0,
-    name_contains: Optional[str] = None,
-    email_contains: Optional[str] = None
-) -> str:
-    """
-    Helper that can be called from a script/CLI to create an export file and return its path.
-    """
-    logger.info("CLI export invoked with output_filename=%s limit=%d offset=%d", output_filename, limit, offset)
-    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-    if output_filename is None:
-        output_filename = generate_export_filename("users_export_cli")
-    path = write_rows_to_excel(rows, output_filename)
-    logger.info("CLI export saved to %s", path)
-    return path
-
-
-if __name__ == "__main__":
-    # Minimal demonstration: initialize DB and create an export file locally
-
-
-    #DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
-
-
-    logger.info("Running secure_export_api.py as a script (demo mode)")
-    init_db()
-    demo_path = export_users_to_excel_file_cli(limit=50)
-    logger.info("Demo export created at: %s", demo_path)
-    print("Demo export created at:", demo_path)
-    print("To run the API server use: uvicorn secure_export_api:app --reload")
+if __name__ == '__main__':
+    # Ensure export dir exists
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    logger.info("Starting Flask Secure Export API on http://127.0.0.1:8000")
+    # Default host/port chosen to be 0.0.0.0:8000 for local dev
+    app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
