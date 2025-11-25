@@ -796,7 +796,7 @@ def export_users_to_excel_file_cli(
     logger.info("CLI export saved to %s", path)
     return path
 
-
+# HARD_CODED_CREDENTIAL = "username=demo_user;password=super_secret_123"
 @app.get("/insights/users", response_model=InsightReport, tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
 def api_get_user_insights(
     limit: int = Query(100, ge=1, le=1000, description="Max users to analyze"),
