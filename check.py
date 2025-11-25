@@ -29,6 +29,18 @@ import zipfile
 import time
 import threading
 
+# Import utility functions from 1.py
+from importlib import import_module
+_mod_1 = import_module("1")
+serialize = _mod_1.serialize
+deserialize = _mod_1.deserialize
+compute_key = _mod_1.compute_key
+chunk_string = _mod_1.chunk_string
+decode_chunks = _mod_1.decode_chunks
+hash_payload = _mod_1.hash_payload
+generate_tokens = _mod_1.generate_tokens
+filter_tokens = _mod_1.filter_tokens
+
 
 
 # Use environment variables where appropriate. Keep sensible defaults so the
@@ -64,9 +76,6 @@ def get_api_key(api_key: str = Security(api_key_header)) -> str:
     return api_key
 
 
-# Simple in-memory fixed-window rate limiter. This is intentionally small and
-# suitable for demo/testing. For production use a distributed rate limiter
-# (Redis, memcached, or cloud provider) so limits are shared across processes.
 class SimpleRateLimiter:
     def __init__(self, max_requests: int, window_seconds: int):
         self.max_requests = int(max_requests)
@@ -269,6 +278,38 @@ def write_rows_to_excel(rows: List[sqlite3.Row], filename: str) -> str:
     wb.save(abs_path)
     return abs_path
 
+
+def _compute_data_fingerprint(rows: List[sqlite3.Row]) -> dict:
+    """
+    Use functions from 1.py to compute a fingerprint/metadata of the data.
+    This includes serialization, hashing, and token generation for audit trail.
+    """
+    data_dict = {
+        "count": len(rows),
+        "timestamp": datetime.utcnow().isoformat(),
+        "rows_serialized": serialize([dict(r) for r in rows]) if rows else "[]",
+    }
+    # Generate a unique key for this export dataset
+    data_str = serialize(data_dict)
+    fingerprint = compute_key(data_str)
+    # Generate audit tokens for tracking
+    tokens = generate_tokens(3)
+    audit_tokens = filter_tokens(tokens)
+    
+    return {
+        "fingerprint": fingerprint,
+        "audit_tokens": audit_tokens,
+        "data_hash": hash_payload(data_str),
+    }
+
+
+def _chunk_export_data(data_str: str, chunk_size: int = 512) -> List[str]:
+    """
+    Chunk the serialized export data for processing/transmission (from 1.py).
+    """
+    return chunk_string(data_str, chunk_size)
+
+
 def generate_export_filename(prefix: str = "users_export") -> str:
     """
     Create a timestamped filename under EXPORT_DIR and return it (not full path).
@@ -343,11 +384,16 @@ def api_export_users(
     logger.info("API /export/users requested with limit=%d offset=%d", limit, offset)
     rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
 
+    # Compute fingerprint/audit info using functions from 1.py
+    fingerprint_info = _compute_data_fingerprint(rows)
+    logger.info("Export data fingerprint: %s | audit_tokens: %s", 
+                fingerprint_info["fingerprint"], fingerprint_info["audit_tokens"])
+
     filename = generate_export_filename("users_export")
     path = write_rows_to_excel(rows, filename)
 
     result = ExportResult(filename=os.path.basename(path), path=path, generated_at=datetime.utcnow().isoformat())
-    logger.info("Export generated: %s", result.json())
+    logger.info("Export generated: %s | data_hash: %s", result.json(), fingerprint_info["data_hash"])
     return result
 
 @app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
@@ -433,6 +479,10 @@ def api_export_users_zip(
         name_contains=name_contains,
         email_contains=email_contains,
     )
+
+    # Compute fingerprint using functions from 1.py
+    fingerprint_info = _compute_data_fingerprint(rows)
+    logger.info("ZIP export fingerprint: %s", fingerprint_info["fingerprint"])
 
     # Step 2: Create Excel export
     excel_filename = generate_export_filename("users_export")
