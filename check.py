@@ -20,6 +20,7 @@ import logging
 from typing import List, Optional, Tuple
 from datetime import datetime
 from tempfile import gettempdir
+import json
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -28,6 +29,15 @@ from openpyxl import Workbook
 import zipfile
 import time
 import threading
+
+# OpenAI imports and configuration
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    logger_early = logging.getLogger("secure_export_api")
+    logger_early.warning("openai package not installed. Install with: pip install openai")
 
 # Import utility functions from 1.py
 from importlib import import_module
@@ -53,6 +63,23 @@ LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
 numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("secure_export_api")
+
+# OpenAI Configuration
+OPENAI_API_KEY = "OPENAI_API_KEY"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo")
+openai_client = None
+if OPENAI_AVAILABLE and OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        logger.info("OpenAI client initialized with model: %s", OPENAI_MODEL)
+    except Exception as e:
+        logger.error("Failed to initialize OpenAI client: %s", e)
+        openai_client = None
+else:
+    if not OPENAI_AVAILABLE:
+        logger.warning("openai library not available. Install with: pip install openai")
+    if not OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not set in environment. Insights feature disabled.")
 
 # Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
 # to secure the endpoints. Default is a placeholder and should be changed in
@@ -134,6 +161,14 @@ class ExportResult(BaseModel):
     filename: str
     path: str
     generated_at: str
+
+class InsightReport(BaseModel):
+    insights: str = Field(..., description="AI-generated insights from OpenAI")
+    summary: Optional[str] = Field(None, description="Data summary sent to OpenAI")
+    model: str = Field(..., description="OpenAI model used for analysis")
+    tokens_used: int = Field(..., description="Total tokens consumed by OpenAI API")
+    generated_at: str = Field(..., description="ISO timestamp when insights were generated")
+    user_count: int = Field(..., description="Number of users in the analysis")
 
 
 def get_connection(path: str = DB_PATH) -> sqlite3.Connection:
@@ -308,6 +343,84 @@ def _chunk_export_data(data_str: str, chunk_size: int = 512) -> List[str]:
     Chunk the serialized export data for processing/transmission (from 1.py).
     """
     return chunk_string(data_str, chunk_size)
+
+
+def _format_data_for_openai_prompt(rows: List[sqlite3.Row]) -> str:
+    """
+    Format row data into a text-based report suitable for OpenAI analysis.
+    This creates a human-readable summary that OpenAI can analyze.
+    """
+    if not rows:
+        return "No user data available for analysis."
+    
+    summary = f"USER DATA REPORT\n{'='*50}\n"
+    summary += f"Total Users: {len(rows)}\n"
+    summary += f"Report Generated: {datetime.utcnow().isoformat()}\n\n"
+    
+    summary += "USER SUMMARY:\n"
+    for idx, row in enumerate(rows[:20], 1):  # Limit to first 20 for prompt size
+        summary += f"{idx}. Name: {row['name']}, Email: {row['email']}, Signup: {row['signup_ts']}\n"
+    
+    if len(rows) > 20:
+        summary += f"... and {len(rows) - 20} more users\n"
+    
+    summary += "\nKEY STATISTICS:\n"
+    summary += f"- First signup: {rows[0]['signup_ts'] if rows else 'N/A'}\n"
+    summary += f"- Latest signup: {rows[-1]['signup_ts'] if rows else 'N/A'}\n"
+    summary += f"- Sample emails: {', '.join(r['email'] for r in rows[:5])}\n"
+    
+    return summary
+
+
+def _get_openai_insights(data_prompt: str) -> Optional[dict]:
+    """
+    Send data report to OpenAI and get insights/analysis.
+    Returns a dict with 'insights', 'summary', and 'recommendations'.
+    Returns None if OpenAI is not available or fails.
+    """
+    if not openai_client:
+        logger.warning("OpenAI client not initialized. Insights not available.")
+        return None
+    
+    try:
+        logger.info("Sending data to OpenAI for analysis...")
+        
+        # Craft the prompt asking for meaningful insights
+        prompt = f"""Analyze the following user data report and provide:
+1. Key insights about the user base
+2. Notable patterns or trends
+3. Data quality observations
+4. Actionable recommendations
+
+USER DATA:
+{data_prompt}
+
+Please provide concise, actionable insights."""
+
+        # Call OpenAI API
+        response = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a data analysis expert. Provide clear, concise insights from user data."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        insights_text = response.choices[0].message.content
+        logger.info("Successfully received insights from OpenAI")
+        
+        return {
+            "insights": insights_text,
+            "model": OPENAI_MODEL,
+            "tokens_used": response.usage.total_tokens,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error("Failed to get insights from OpenAI: %s", str(e))
+        return None
 
 
 def generate_export_filename(prefix: str = "users_export") -> str:
@@ -519,6 +632,62 @@ def export_users_to_excel_file_cli(
     path = write_rows_to_excel(rows, output_filename)
     logger.info("CLI export saved to %s", path)
     return path
+
+
+@app.get("/insights/users", response_model=InsightReport, tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+def api_get_user_insights(
+    limit: int = Query(100, ge=1, le=1000, description="Max users to analyze"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
+    email_contains: Optional[str] = Query(None, description="Filter by email substring")
+):
+    """
+    Fetch user data, generate a report, and send it to OpenAI for analysis.
+    Returns insights, key findings, and recommendations from the AI analysis.
+    Requires OPENAI_API_KEY environment variable to be set.
+    """
+    logger.info("API /insights/users called with limit=%d offset=%d", limit, offset)
+    
+    if not openai_client:
+        logger.error("OpenAI client not initialized. Cannot generate insights.")
+        raise HTTPException(
+            status_code=503,
+            detail="Insights feature unavailable. Ensure OPENAI_API_KEY is set and openai package is installed."
+        )
+    
+    # Fetch user data
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    
+    if not rows:
+        logger.warning("No users found for insight generation")
+        raise HTTPException(status_code=404, detail="No users found matching the criteria")
+    
+    # Format data for OpenAI
+    data_summary = _format_data_for_openai_prompt(rows)
+    logger.info("Formatted %d users into prompt for OpenAI", len(rows))
+    
+    # Get insights from OpenAI
+    insight_result = _get_openai_insights(data_summary)
+    
+    if not insight_result:
+        logger.error("Failed to generate insights from OpenAI")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate insights. Please check your OpenAI API key and try again."
+        )
+    
+    # Build response
+    report = InsightReport(
+        insights=insight_result["insights"],
+        summary=data_summary[:500],  # Include first 500 chars of summary
+        model=insight_result["model"],
+        tokens_used=insight_result["tokens_used"],
+        generated_at=insight_result["generated_at"],
+        user_count=len(rows)
+    )
+    
+    logger.info("Insights report generated successfully with %d tokens used", insight_result["tokens_used"])
+    return report
 
 
 if __name__ == "__main__":
