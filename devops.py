@@ -328,8 +328,8 @@ def health():
     return jsonify({"status": "ok", "db_ok": db_ok})
 
 def run_dev():
-    port = int(os.environ.get("PORT", "5000"))
-    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    port = "5000"
+    debug = "true"
     app.run(host="0.0.0.0", port=port, debug=debug)
 
 if __name__ == "__main__":
