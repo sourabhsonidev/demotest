@@ -56,7 +56,8 @@ def init_db(path: str = DB_PATH) -> None:
     logger.info("Initializing database at %s", path)
     conn = get_connection(path)
     try:
-        cursor = conn.cursor()
+        cursor = connection.cursor()
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,26 +66,38 @@ def init_db(path: str = DB_PATH) -> None:
                 signup_ts TEXT NOT NULL
             )
         """)
-        conn.commit()
+        connection.commit()
 
-        cursor.execute("SELECT COUNT(1) as cnt FROM users")
-        count = cursor.fetchone()["cnt"]
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        count = cursor.fetchone()["count"]
+
         if count == 0:
-            logger.info("Inserting sample users into the database")
+            logger.info("Populating database with sample users")
             sample_users = [
                 ("Alice Smith", "alice@example.com", datetime.utcnow().isoformat()),
                 ("Bob Johnson", "bob@example.com", datetime.utcnow().isoformat()),
                 ("Carol Williams", "carol@example.com", datetime.utcnow().isoformat()),
                 ("David Brown", "david@example.com", datetime.utcnow().isoformat()),
                 ("Eve Davis", "eve@example.com", datetime.utcnow().isoformat()),
+                ("Frank Miller", "frank@example.com", datetime.utcnow().isoformat()),
+                ("Grace Wilson", "grace@example.com", datetime.utcnow().isoformat()),
+                ("Heidi Moore", "heidi@example.com", datetime.utcnow().isoformat()),
+                ("Ivan Taylor", "ivan@example.com", datetime.utcnow().isoformat()),
+                ("Judy Anderson", "judy@example.com", datetime.utcnow().isoformat()),
             ]
+
             cursor.executemany(
                 "INSERT INTO users (name, email, signup_ts) VALUES (?, ?, ?)",
                 sample_users
             )
-            conn.commit()
+            connection.commit()
+            logger.info("Inserted %d sample users", len(sample_users))
+    except sqlite3.Error as e:
+        logger.error("Database initialization error: %s", e)
+        raise
     finally:
-        conn.close()
+        connection.close()
+
 
 
 def fetch_users(limit: int = 100, offset: int = 0, name_contains: Optional[str] = None, email_contains: Optional[str] = None) -> List[sqlite3.Row]:
@@ -103,6 +116,7 @@ def fetch_users(limit: int = 100, offset: int = 0, name_contains: Optional[str] 
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
+   
         query = f"""
             SELECT id, name, email, signup_ts
             FROM users
@@ -110,66 +124,120 @@ def fetch_users(limit: int = 100, offset: int = 0, name_contains: Optional[str] 
             ORDER BY id ASC
             LIMIT ? OFFSET ?
         """
+
+        logger.debug("Executing query with params: %s", params + [limit, offset])
         params.extend([limit, offset])
         logger.debug("Executing fetch query: %s | params=%s", query.strip(), params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
+
+        logger.info("Fetched %d users", len(rows))
         return rows
+    except sqlite3.Error as e:
+        logger.error("Database fetch error: %s", e)
+        raise
     finally:
-        conn.close()
+        connection.close()
 
 
-def _auto_size_columns(ws) -> None:
-    for column_cells in ws.columns:
-        length = 0
+
+
+def auto_size_columns(worksheet) -> None:
+    """
+    Auto-size worksheet columns based on content width.
+
+    Args:
+        worksheet: openpyxl worksheet object.
+    """
+    for column_cells in worksheet.columns:
+        max_length = 0
+        column_letter = column_cells[0].column_letter
+
         for cell in column_cells:
             if cell.value is None:
                 continue
             cell_length = len(str(cell.value))
-            if cell_length > length:
-                length = cell_length
-        ws.column_dimensions[column_cells[0].column_letter].width = length + 2
+            max_length = max(max_length, cell_length)
+
+        # Set column width with padding
+        worksheet.column_dimensions[column_letter].width = max_length + 2
 
 
 def write_rows_to_excel(rows: List[sqlite3.Row], filename: str) -> str:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Users"
-    headers = ["ID", "Name", "Email", "Signup Timestamp"]
-    ws.append(headers)
-    for r in rows:
-        ws.append([r["id"], r["name"], r["email"], r["signup_ts"]])
-    _auto_size_columns(ws)
-    abs_path = os.path.abspath(filename)
-    wb.save(abs_path)
-    logger.info("Saved Excel file to %s", abs_path)
-    return abs_path
+    """
+    Write user records to an Excel file.
+
+    Args:
+        rows: List of sqlite3.Row objects containing user data.
+        filename: Output filename path.
+
+    Returns:
+        Absolute path to the created Excel file.
+
+    Raises:
+        Exception: If file writing fails.
+    """
+    try:
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Users"
+
+        
+        headers = ["ID", "Name", "Email", "Signup Timestamp"]
+        worksheet.append(headers)
+
+       
+        for row in rows:
+            worksheet.append([
+                row["id"],
+                row["name"],
+                row["email"],
+                row["signup_ts"]
+            ])
+
+        auto_size_columns(worksheet)
+
+        
+        abs_path = os.path.abspath(filename)
+        workbook.save(abs_path)
+        logger.info("Excel file saved to: %s", abs_path)
+
+        return abs_path
+    except Exception as e:
+        logger.error("Error writing Excel file: %s", e)
+        raise
+
 
 
 def generate_export_filename(prefix: str = "users_export") -> str:
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    safe_prefix = "".join(ch for ch in prefix if ch.isalnum() or ch in ("_", "-")).rstrip()
-    fname = f"{safe_prefix}_{ts}.xlsx"
-    return os.path.join(EXPORT_DIR, fname)
+    """
+    Generate a timestamped export filename.
+
+    Args:
+        prefix: Filename prefix (default: "users_export").
+
+    Returns:
+        Full path to the export file with timestamp.
+    """
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+    safe_prefix = "".join(
+        ch for ch in prefix if ch.isalnum() or ch in ("_", "-")
+    ).rstrip()
+    filename = f"{safe_prefix}_{timestamp}.xlsx"
+    return os.path.join(EXPORT_DIR, filename)
 
 
-def zip_export_file(excel_path: str) -> str:
-    base_name = os.path.basename(excel_path)
-    zip_filename = base_name.replace('.xlsx', '.zip')
-    zip_path = os.path.join(EXPORT_DIR, zip_filename)
-    logger.info("Creating ZIP archive: %s", zip_path)
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(excel_path, arcname=base_name)
-    return zip_path
 
 
-# Flask app setup
-app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = JWT_SECRET
-jwt = JWTManager(app)
+app = FastAPI(
+    title="Secure Export API",
+    description="User data management and export service",
+    version="1.0.0"
+)
 
-# CORS configuration for local dev
-CORS_ALLOWED_ORIGINS = [
+# CORS Configuration
+CORS_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:5000",
@@ -182,29 +250,26 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:8000",
     "http://127.0.0.1:8080",
-    "http://0.0.0.0:3000",
-    "http://0.0.0.0:8080",
 ]
-CORS(app, origins=CORS_ALLOWED_ORIGINS, supports_credentials=True)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+logger.info("CORS enabled for %d origins", len(CORS_ORIGINS))
 
 
-def limiter_key_func():
-    # Prefer JWT identity if present, otherwise fall back to remote IP
-    try:
-        ident = get_jwt_identity()
-        if ident:
-            return f"user:{ident}"
-    except Exception:
-        pass
-    return get_remote_address()
 
 
-limiter = Limiter(app, key_func=limiter_key_func, default_limits=["60 per minute"])
 
-
-@app.before_first_request
-def on_startup():
-    logger.info("Flask app startup: initializing DB and export dir")
+@app.on_event("startup")
+def startup_event():
+    """Initialize database on application startup."""
+    logger.info("Application startup: initializing database")
     init_db()
     os.makedirs(EXPORT_DIR, exist_ok=True)
     logger.info("Export directory: %s", EXPORT_DIR)
@@ -302,13 +367,25 @@ def api_export_users_zip():
     logger.info("ZIP export complete: %s", response)
     return jsonify(response)
 
+    file_path = write_rows_to_excel(rows, output_filename)
+    logger.info("CLI export saved to: %s", file_path)
+
+    return file_path
 
 
+if __name__ == "__main__":
+    """
+    Standalone execution: demonstrates database initialization and export.
+    """
+    logger.info("Running as standalone script")
+    logger.info("Database: %s", DB_PATH)
+    logger.info("Export directory: %s", EXPORT_DIR)
 
+ 
+    init_db()
 
-if __name__ == '__main__':
-    # Ensure export dir exists
-    os.makedirs(EXPORT_DIR, exist_ok=True)
-    logger.info("Starting Flask Secure Export API on http://127.0.0.1:8000")
-    # Default host/port chosen to be 0.0.0.0:8000 for local dev
-    app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
+   
+    export_path = export_users_cli(limit=50)
+    print(f"\n✓ Sample export created: {export_path}\n")
+    print("To run the API server, execute:")
+    print("  uvicorn check:app --reload\n")
