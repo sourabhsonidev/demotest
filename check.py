@@ -303,28 +303,7 @@ def api_export_users_zip():
     return jsonify(response)
 
 
-@app.route('/create-sample-data', methods=['POST'])
-@jwt_required()
-@limiter.limit("60 per minute")
-def api_create_sample_data():
-    logger.info("Creating additional sample data via API")
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        now = datetime.utcnow().isoformat()
-        cursor.execute("SELECT COUNT(1) as cnt FROM users")
-        start = cursor.fetchone()["cnt"] + 1
-        to_insert = []
-        for i in range(start, start + 100):
-            name = f"SampleUser{i}"
-            email = f"sample{i}@example.com"
-            to_insert.append((name, email, now))
-        cursor.executemany("INSERT INTO users (name, email, signup_ts) VALUES (?, ?, ?)", to_insert)
-        conn.commit()
-        logger.info("Inserted %d sample users", len(to_insert))
-        return jsonify({"inserted": len(to_insert)})
-    finally:
-        conn.close()
+
 
 
 if __name__ == '__main__':
