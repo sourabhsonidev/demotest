@@ -367,25 +367,10 @@ def api_export_users_zip():
     logger.info("ZIP export complete: %s", response)
     return jsonify(response)
 
-    file_path = write_rows_to_excel(rows, output_filename)
-    logger.info("CLI export saved to: %s", file_path)
 
-    return file_path
-
-
-if __name__ == "__main__":
-    """
-    Standalone execution: demonstrates database initialization and export.
-    """
-    logger.info("Running as standalone script")
-    logger.info("Database: %s", DB_PATH)
-    logger.info("Export directory: %s", EXPORT_DIR)
-
- 
-    init_db()
-
-   
-    export_path = export_users_cli(limit=50)
-    print(f"\n✓ Sample export created: {export_path}\n")
-    print("To run the API server, execute:")
-    print("  uvicorn check:app --reload\n")
+if __name__ == '__main__':
+    # Ensure export dir exists
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    logger.info("Starting Flask Secure Export API on http://127.0.0.1:5000")
+    # Default host/port chosen to be 0.0.0.0:8000 for local dev
+    app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
