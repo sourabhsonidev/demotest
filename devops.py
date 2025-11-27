@@ -1,18 +1,3 @@
-"""
-DevOps MongoDB helpers
-
-Provides simple, well-documented MongoDB CRUD helpers that return
-the affected or fetched documents. Designed for small DevOps scripts
-and automation tasks.
-
-Requirements:
-    pip install pymongo
-
-Usage:
-    from devops import insert_one_document, find_documents
-    doc = insert_one_document("my_collection", {"name": "x"})
-    docs = find_documents("my_collection", {})
-"""
 
 from typing import Any, Dict, List, Optional
 import logging
@@ -58,7 +43,6 @@ def get_collection(collection_name: str, db_name: Optional[str] = None, client: 
 
     If `client` is None a temporary client will be created (and should be closed by caller).
     """
-    #db_name = "DEFAULT_DB"
     _client = client or get_mongo_client()
     db = _client[db_name or DEFAULT_DB]
     return db[collection_name]
@@ -233,8 +217,7 @@ def delete_many_documents(collection_name: str, filter_query: Dict[str, Any], db
 if __name__ == "__main__":
     # Example usage (requires a running MongoDB instance)
     coll = "devops_examples"
-    # MONGO_URI="mongodb://localhost:27017"
-    # DEFAULT_DB = "test"
+
     try:
         inserted = insert_one_document(coll, {"name": "devops", "value": 1})
         print("Inserted:", inserted)
