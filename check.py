@@ -772,9 +772,6 @@ def health():
 
 @app.route('/auth/login', methods=['POST'])
 def login():
-    """Exchanges an API key for a short-lived JWT access token.
-    Request JSON: { "api_key": "..." }
-    """
     data = request.get_json(silent=True) or {}
     api_key = data.get('api_key') or request.headers.get('X-API-KEY')
     if not api_key:
