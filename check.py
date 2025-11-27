@@ -850,22 +850,7 @@ def api_download_export(filename: str):
     return send_file(full_path, as_attachment=True)
 
 
-@app.route('/export/users/zip', methods=['GET'])
-@jwt_required()
-@limiter.limit("60 per minute")
-def api_export_users_zip():
-    limit = int(request.args.get('limit', 1000))
-    offset = int(request.args.get('offset', 0))
-    name_contains = request.args.get('name_contains')
-    email_contains = request.args.get('email_contains')
-    logger.info("API /export/users/zip called")
-    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-    excel_filename = generate_export_filename('users_export')
-    excel_path = write_rows_to_excel(rows, excel_filename)
-    zip_path = zip_export_file(excel_path)
-    response = {"excel_file": os.path.basename(excel_path), "zip_file": os.path.basename(zip_path), "zip_path": zip_path, "generated_at": datetime.utcnow().isoformat()}
-    logger.info("ZIP export complete: %s", response)
-    return jsonify(response)
+
 
 
 if __name__ == '__main__':
