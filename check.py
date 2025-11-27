@@ -848,81 +848,32 @@ def api_download_export(filename: str):
     # Check if file exists
     full_path = os.path.join(EXPORT_DIR, filename)
     if not os.path.exists(full_path):
-        logger.error("File not found: %s", full_path)
-        raise HTTPException(
-            status_code=404,
-            detail="Export file not found"
-        )
-
-    logger.info("Serving file for download: %s", full_path)
-    return FileResponse(
-        full_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename
-    )
+        logger.error("Requested file does not exist: %s", full_path)
+        return jsonify({"msg": "File not found"}), 404
+    return send_file(full_path, as_attachment=True)
 
 
-
-
-
-@app.post("/admin/sample-data", tags=["admin"])
-def create_sample_data():
-    """
-    Create additional sample data for testing.
-
-    Appends 100 new sample users to the database.
-
-    Returns:
-        Dictionary with count of inserted users
-    """
-    logger.info("Creating additional sample data")
-
-    connection = get_connection()
-    try:
-        cursor = connection.cursor()
-
-        # Get current user count
-        cursor.execute("SELECT COUNT(*) as count FROM users")
-        current_count = cursor.fetchone()["count"]
-
-        # Create sample users
-        sample_data = []
-        now = datetime.utcnow().isoformat()
-        cursor.execute("SELECT COUNT(1) as cnt FROM users")
-        start = cursor.fetchone()["cnt"] + 1
-        to_insert = []
-        for i in range(start, start + 100):
-            name = f"SampleUser{i}"
-            email = f"sample{i}@example.com"
-            sample_data.append((name, email, now))
-
-        # Insert data
-        cursor.executemany(
-            "INSERT INTO users (name, email, signup_ts) VALUES (?, ?, ?)",
-            sample_data
-        )
-        connection.commit()
-
-        logger.info("Inserted %d sample users", len(sample_data))
-        return {
-            "message": "Sample data created successfully",
-            "inserted": len(sample_data)
-        }
-    except sqlite3.Error as e:
-        logger.error("Error creating sample data: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create sample data"
-        )
-    finally:
-        connection.close()
-
-
+@app.route('/export/users/zip', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_export_users_zip():
+    limit = int(request.args.get('limit', 1000))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /export/users/zip called")
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    excel_filename = generate_export_filename('users_export')
+    excel_path = write_rows_to_excel(rows, excel_filename)
+    zip_path = zip_export_file(excel_path)
+    response = {"excel_file": os.path.basename(excel_path), "zip_file": os.path.basename(zip_path), "zip_path": zip_path, "generated_at": datetime.utcnow().isoformat()}
+    logger.info("ZIP export complete: %s", response)
+    return jsonify(response)
 
 
 if __name__ == '__main__':
     # Ensure export dir exists
     os.makedirs(EXPORT_DIR, exist_ok=True)
-    logger.info("Starting Flask Secure Export API on http://127.0.0.1:8000")
+    logger.info("Starting Flask Secure Export API on http://127.0.0.1:5000")
     # Default host/port chosen to be 0.0.0.0:8000 for local dev
     app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
