@@ -371,6 +371,6 @@ def api_export_users_zip():
 if __name__ == '__main__':
     # Ensure export dir exists
     os.makedirs(EXPORT_DIR, exist_ok=True)
-    logger.info("Starting Flask Secure Export API on http://127.0.0.1:5000")
+    logger.info("Starting Flask Secure Export API on http://127.0.0.1:7000")
     # Default host/port chosen to be 0.0.0.0:8000 for local dev
     app.run(host='0.0.0.0', port=8000, debug=(LOG_LEVEL == 'DEBUG'))
