@@ -800,21 +800,21 @@ def api_list_users():
     return jsonify(users)
 
 
-@app.route('/export/users', methods=['GET'])
-@jwt_required()
-@limiter.limit("60 per minute")
-def api_export_users():
-    limit = int(request.args.get('limit', 1000))
-    offset = int(request.args.get('offset', 0))
-    name_contains = request.args.get('name_contains')
-    email_contains = request.args.get('email_contains')
-    logger.info("API /export/users requested limit=%s offset=%s", limit, offset)
-    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
-    filename = generate_export_filename('users_export')
-    path = write_rows_to_excel(rows, filename)
-    result = {"filename": os.path.basename(path), "path": path, "generated_at": datetime.utcnow().isoformat()}
-    logger.info("Export generated: %s", result)
-    return jsonify(result)
+# @app.route('/export/users', methods=['GET'])
+# @jwt_required()
+# @limiter.limit("60 per minute")
+# def api_export_users():
+#     limit = int(request.args.get('limit', 1000))
+#     offset = int(request.args.get('offset', 0))
+#     name_contains = request.args.get('name_contains')
+#     email_contains = request.args.get('email_contains')
+#     logger.info("API /export/users requested limit=%s offset=%s", limit, offset)
+#     rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+#     filename = generate_export_filename('users_export')
+#     path = write_rows_to_excel(rows, filename)
+#     result = {"filename": os.path.basename(path), "path": path, "generated_at": datetime.utcnow().isoformat()}
+#     logger.info("Export generated: %s", result)
+#     return jsonify(result)
 
 
 @app.route('/download/export/<path:filename>', methods=['GET'])
