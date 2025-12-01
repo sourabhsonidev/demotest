@@ -1168,26 +1168,26 @@ def api_get_insights_history(
     }
 
 
-@app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_get_single_insight(insight_id: str):
-    """
-    Retrieve a specific insight by ID from MongoDB.
-    """
-    logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
+# @app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+# def api_get_single_insight(insight_id: str):
+#     """
+#     Retrieve a specific insight by ID from MongoDB.
+#     """
+#     logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
     
-    if not mongodb_db:
-        logger.warning("MongoDB not connected. Cannot retrieve insight.")
-        raise HTTPException(
-            status_code=503,
-            detail="Insights feature unavailable. MongoDB not configured."
-        )
+#     if not mongodb_db:
+#         logger.warning("MongoDB not connected. Cannot retrieve insight.")
+#         raise HTTPException(
+#             status_code=503,
+#             detail="Insights feature unavailable. MongoDB not configured."
+#         )
     
-    result = _retrieve_insights_from_mongodb(insight_id=insight_id)
+#     result = _retrieve_insights_from_mongodb(insight_id=insight_id)
     
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
+#     if not result:
+#         raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
     
-    return result["insight"]
+#     return result["insight"]
 
 
 @app.delete("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
@@ -1216,17 +1216,17 @@ def api_delete_insight(insight_id: str):
     }
 
 
-    return file_path
+    # return file_path
 
 
-    #DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
+    # #DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
 
 
  
-    init_db()
+    # init_db()
 
    
-    export_path = export_users_cli(limit=50)
-    print(f"\n✓ Sample export created: {export_path}\n")
-    print("To run the API server, execute:")
-    print("  uvicorn check:app --reload\n")
+    # export_path = export_users_cli(limit=50)
+    # print(f"\n✓ Sample export created: {export_path}\n")
+    # print("To run the API server, execute:")
+    # print("  uvicorn check:app --reload\n")
