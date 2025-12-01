@@ -323,21 +323,7 @@ def fetch_users(
     email_contains: Optional[str] = None,
     db_path: str = DB_PATH
 ) -> List[sqlite3.Row]:
-    """
-    Fetch users from database with optional filtering and pagination.
 
-    Uses parameterized queries to prevent SQL injection attacks.
-
-    Args:
-        limit: Maximum number of users to return (default: 100).
-        offset: Number of users to skip (default: 0).
-        name_contains: Filter by name substring.
-        email_contains: Filter by email substring.
-        db_path: Path to the SQLite database file.
-
-    Returns:
-        List of sqlite3.Row objects containing user data.
-    """
     connection = get_connection(db_path)
 
     try:
