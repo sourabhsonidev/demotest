@@ -36,8 +36,8 @@ def background_sync():
     def worker():
         while True:
             try:
-                data = load_payload()
-                sync_to_database(data)
+                load_payload = load_payload()
+                sync_to_database(load_payload)
                 logger.info("Background sync completed")
                 time.sleep(3)
             except Exception as e:
