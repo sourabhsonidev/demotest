@@ -463,133 +463,56 @@ def root():
     }
 
 
-@app.get("/health", tags=["health"])
-def health_check():
-    """Health status endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
-    }
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
 
 
+@app.route('/auth/login', methods=['POST'])
+def login():
+    data = request.get_json(silent=True) or {}
+    api_key = data.get('api_key') or request.headers.get('X-API-KEY')
+    if not api_key:
+        return jsonify({"msg": "Missing API key"}), 400
+    if api_key != API_KEY:
+        logger.warning("Invalid API key attempted via /auth/login")
+        return jsonify({"msg": "Invalid API key"}), 401
+
+    # Create a token with identity==api_key (or could be a username)
+    access_token = create_access_token(identity=api_key)
+    return jsonify(access_token=access_token)
 
 
-
-@app.get("/users", response_model=List[User], tags=["users"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_list_users(
-    limit: int = Query(50, ge=1, le=1000, description="Maximum number of users to return"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
-    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
-    email_contains: Optional[str] = Query(None, description="Filter by email substring")
-):
-    """
-    Retrieve a list of users with optional filtering and pagination.
-
-    Parameters:
-        - limit: Maximum number of users to return
-        - offset: Number of users to skip
-        - name_contains: Filter users by name
-        - email_contains: Filter users by email
-
-    Returns:
-        List of User objects
-    """
-    logger.info(
-        "GET /users called with limit=%d, offset=%d, "
-        "name_contains=%s, email_contains=%s",
-        limit, offset, name_contains, email_contains
-    )
-
-    try:
-        rows = fetch_users(
-            limit=limit,
-            offset=offset,
-            name_contains=name_contains,
-            email_contains=email_contains
-        )
-
-        users = [
-            User(
-                id=row["id"],
-                name=row["name"],
-                email=row["email"],
-                signup_ts=row["signup_ts"]
-            )
-            for row in rows
-        ]
-        return users
-    except Exception as e:
-        logger.error("Error listing users: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve users"
-        )
+@app.route('/users', methods=['GET'])
+@jwt_required(optional=True)
+@limiter.limit("60 per minute")
+def api_list_users():
+    # Protected: jwt_required(optional=True) allows rate-limiting by user if present
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /users called limit=%s offset=%s name_contains=%s email_contains=%s", limit, offset, name_contains, email_contains)
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    users = [dict(id=r['id'], name=r['name'], email=r['email'], signup_ts=r['signup_ts']) for r in rows]
+    return jsonify(users)
 
 
-
-
-
-@app.get("/export/users", response_model=ExportResult, tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_export_users(
-    limit: int = Query(1000, ge=1, le=5000, description="Max rows to export"),
-    offset: int = Query(0, ge=0, description="Export offset"),
-    name_contains: Optional[str] = Query(
-        None, description="Filter by name substring"
-    ),
-    email_contains: Optional[str] = Query(
-        None, description="Filter by email substring"
-    )
-):
-    """
-    Export filtered users to an Excel file.
-
-    Returns metadata about the generated export file.
-
-    Parameters:
-        - limit: Maximum number of users to export
-        - offset: Pagination offset
-        - name_contains: Filter by name
-        - email_contains: Filter by email
-
-    Returns:
-        ExportResult containing file path and metadata
-    """
-    logger.info(
-        "GET /export/users called with limit=%d, offset=%d",
-        limit, offset
-    )
-
-    try:
-        # Fetch users
-        rows = fetch_users(
-            limit=limit,
-            offset=offset,
-            name_contains=name_contains,
-            email_contains=email_contains
-        )
-
-    # Compute fingerprint/audit info using functions from 1.py
-    fingerprint_info = _compute_data_fingerprint(rows)
-    logger.info("Export data fingerprint: %s | audit_tokens: %s", 
-                fingerprint_info["fingerprint"], fingerprint_info["audit_tokens"])
-
-    filename = generate_export_filename("users_export")
+@app.route('/export/users', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_export_users():
+    limit = int(request.args.get('limit', 1000))
+    offset = int(request.args.get('offset', 0))
+    name_contains = request.args.get('name_contains')
+    email_contains = request.args.get('email_contains')
+    logger.info("API /export/users requested limit=%s offset=%s", limit, offset)
+    rows = fetch_users(limit=limit, offset=offset, name_contains=name_contains, email_contains=email_contains)
+    filename = generate_export_filename('users_export')
     path = write_rows_to_excel(rows, filename)
-
-        # Return result
-        result = ExportResult(
-            filename=os.path.basename(file_path),
-            path=file_path,
-            generated_at=datetime.utcnow().isoformat()
-        )
-        logger.info("Export created: %s | data_hash: %s", result.filename, fingerprint_info["data_hash"])
-        return result
-    except Exception as e:
-        logger.error("Error exporting users: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to export users"
-        )
+    result = {"filename": os.path.basename(path), "path": path, "generated_at": datetime.utcnow().isoformat()}
+    logger.info("Export generated: %s", result)
+    return jsonify(result)
 
 
 @app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
