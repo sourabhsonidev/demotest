@@ -1104,35 +1104,35 @@ class InsightMetadata(BaseModel):
     created_at: str = Field(..., description="When the insight was created")
 
 
-@app.get("/insights/history", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-def api_get_insights_history(
-    limit: int = Query(10, ge=1, le=100, description="Number of recent insights to retrieve"),
-    skip: int = Query(0, ge=0, description="Number of insights to skip (pagination)")
-):
-    """
-    Retrieve historical insights from MongoDB.
-    Shows recent insights with pagination.
-    """
-    logger.info("API /insights/history called with limit=%d skip=%d", limit, skip)
+# @app.get("/insights/history", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+# def api_get_insights_history(
+#     limit: int = Query(10, ge=1, le=100, description="Number of recent insights to retrieve"),
+#     skip: int = Query(0, ge=0, description="Number of insights to skip (pagination)")
+# ):
+#     """
+#     Retrieve historical insights from MongoDB.
+#     Shows recent insights with pagination.
+#     """
+#     logger.info("API /insights/history called with limit=%d skip=%d", limit, skip)
     
-    if not mongodb_db:
-        logger.warning("MongoDB not connected. Cannot retrieve insights history.")
-        raise HTTPException(
-            status_code=503,
-            detail="Insights history unavailable. MongoDB not configured."
-        )
+#     if not mongodb_db:
+#         logger.warning("MongoDB not connected. Cannot retrieve insights history.")
+#         raise HTTPException(
+#             status_code=503,
+#             detail="Insights history unavailable. MongoDB not configured."
+#         )
     
-    result = _retrieve_insights_from_mongodb(limit=limit, skip=skip)
+#     result = _retrieve_insights_from_mongodb(limit=limit, skip=skip)
     
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to retrieve insights history")
+#     if not result:
+#         raise HTTPException(status_code=500, detail="Failed to retrieve insights history")
     
-    return {
-        "insights": result["insights"],
-        "count": result["count"],
-        "skip": result["skip"],
-        "limit": result["limit"]
-    }
+#     return {
+#         "insights": result["insights"],
+#         "count": result["count"],
+#         "skip": result["skip"],
+#         "limit": result["limit"]
+#     }
 
 
 @app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
