@@ -1148,26 +1148,26 @@ def api_get_insights_history(
     }
 
 
-# @app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
-# def api_get_single_insight(insight_id: str):
-#     """
-#     Retrieve a specific insight by ID from MongoDB.
-#     """
-#     logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
+@app.get("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
+def api_get_single_insight(insight_id: str):
+    """
+    Retrieve a specific insight by ID from MongoDB.
+    """
+    logger.info("API /insights/{insight_id} called with ID: %s", insight_id)
     
-#     if not mongodb_db:
-#         logger.warning("MongoDB not connected. Cannot retrieve insight.")
-#         raise HTTPException(
-#             status_code=503,
-#             detail="Insights feature unavailable. MongoDB not configured."
-#         )
+    if not mongodb_db:
+        logger.warning("MongoDB not connected. Cannot retrieve insight.")
+        raise HTTPException(
+            status_code=503,
+            detail="Insights feature unavailable. MongoDB not configured."
+        )
     
-#     result = _retrieve_insights_from_mongodb(insight_id=insight_id)
+    result = _retrieve_insights_from_mongodb(insight_id=insight_id)
     
-#     if not result:
-#         raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Insight with ID {insight_id} not found")
     
-#     return result["insight"]
+    return result["insight"]
 
 
 @app.delete("/insights/{insight_id}", tags=["insights"], dependencies=[Depends(get_api_key), Depends(rate_limit_dependency)])
