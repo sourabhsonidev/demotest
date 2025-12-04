@@ -810,19 +810,19 @@ def api_export_users():
     return jsonify(result)
 
 
-# @app.route('/download/export/<path:filename>', methods=['GET'])
-# @jwt_required()
-# @limiter.limit("60 per minute")
-# def api_download_export(filename: str):
-#     logger.info("Download request for filename=%s", filename)
-#     if os.path.sep in filename or '..' in filename:
-#         logger.warning("Invalid filename attempted for download: %s", filename)
-#         return jsonify({"msg": "Invalid filename"}), 400
-#     full_path = os.path.join(EXPORT_DIR, filename)
-#     if not os.path.exists(full_path):
-#         logger.error("Requested file does not exist: %s", full_path)
-#         return jsonify({"msg": "File not found"}), 404
-#     return send_file(full_path, as_attachment=True)
+@app.route('/download/export/<path:filename>', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute")
+def api_download_export(filename: str):
+    logger.info("Download request for filename=%s", filename)
+    if os.path.sep in filename or '..' in filename:
+        logger.warning("Invalid filename attempted for download: %s", filename)
+        return jsonify({"msg": "Invalid filename"}), 400
+    full_path = os.path.join(EXPORT_DIR, filename)
+    if not os.path.exists(full_path):
+        logger.error("Requested file does not exist: %s", full_path)
+        return jsonify({"msg": "File not found"}), 404
+    return send_file(full_path, as_attachment=True)
 
 
 
