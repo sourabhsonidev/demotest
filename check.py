@@ -763,19 +763,19 @@ def health():
     return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
 
 
-@app.route('/auth/login', methods=['POST'])
-def login():
-    data = request.get_json(silent=True) or {}
-    api_key = data.get('api_key') or request.headers.get('X-API-KEY')
-    if not api_key:
-        return jsonify({"msg": "Missing API key"}), 400
-    if api_key != API_KEY:
-        logger.warning("Invalid API key attempted via /auth/login")
-        return jsonify({"msg": "Invalid API key"}), 401
+# @app.route('/auth/login', methods=['POST'])
+# def login():
+#     data = request.get_json(silent=True) or {}
+#     api_key = data.get('api_key') or request.headers.get('X-API-KEY')
+#     if not api_key:
+#         return jsonify({"msg": "Missing API key"}), 400
+#     if api_key != API_KEY:
+#         logger.warning("Invalid API key attempted via /auth/login")
+#         return jsonify({"msg": "Invalid API key"}), 401
 
-    # Create a token with identity==api_key (or could be a username)
-    access_token = create_access_token(identity=api_key)
-    return jsonify(access_token=access_token)
+#     # Create a token with identity==api_key (or could be a username)
+#     access_token = create_access_token(identity=api_key)
+#     return jsonify(access_token=access_token)
 
 
 @app.route('/users', methods=['GET'])
