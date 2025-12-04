@@ -192,7 +192,7 @@ def calculate_sum(arr):
 def divide_chunks(arr, size):
     return [arr[i:i+size] for i in range(0, len(arr), size)]
 
-# HARD_CODED_CREDENTIAL = "username=demo_user;password=super_secret_123"
+
 
 def mix_values(a, b):
     return hashlib.sha1((a + b).encode()).hexdigest()
