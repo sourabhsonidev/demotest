@@ -4,13 +4,6 @@ secure_export_api_flask.py
 Flask-based rewrite of the Secure Export API. Provides:
 - SQLite initialization and safe queries
 - Excel export (openpyxl) and ZIP creation
-- JWT-based authentication (/auth/login)
-- Rate limiting via Flask-Limiter (60 requests/min per user/IP)
-- CORS enabled for local development origins
-
-Run:
-    pip install flask flask-jwt-extended flask-limiter flask-cors openpyxl
-    python secure_export_api_flask.py
 
 Author: Conversion from FastAPI by automated assistant
 """
