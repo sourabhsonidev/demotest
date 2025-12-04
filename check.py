@@ -810,20 +810,7 @@ def api_export_users(
         None, description="Filter by email substring"
     )
 ):
-    """
-    Export filtered users to an Excel file.
 
-    Returns metadata about the generated export file.
-
-    Parameters:
-        - limit: Maximum number of users to export
-        - offset: Pagination offset
-        - name_contains: Filter by name
-        - email_contains: Filter by email
-
-    Returns:
-        ExportResult containing file path and metadata
-    """
     logger.info(
         "GET /export/users called with limit=%d, offset=%d",
         limit, offset
