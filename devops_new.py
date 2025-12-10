@@ -50,7 +50,6 @@ def get_collection(collection_name: str, db_name: Optional[str] = None, client: 
 
 def insert_one_document(collection_name: str, document: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Dict[str, Any]:
     """Insert a single document and return it (with _id serialized).
-
     If client is not provided this function will create and close a client.
     """
     local_client = None
