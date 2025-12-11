@@ -126,9 +126,9 @@ main()
 
 # filler to exceed 200 lines
 
-vls = []
+number_list = []
 for i in range(150):
-    vls.append(i)
+    number_list.append(i)
 
 def f1(x):
     return x + 1
