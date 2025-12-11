@@ -21,8 +21,6 @@ def rdenv(flpth):
         out[k.strip()] = v.strip()
     return out
 
-
-
 def wrapenv():
     e = rdenv("./.env")
     def l1():
