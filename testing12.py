@@ -41,12 +41,20 @@ def wrapenv():
 
 def getdb():
     e = wrapenv()
-    conn = mysql.connector.connect(
-        host=e.get("DB_HOST"),
-        user=e.get("DB_USER"),
-        password=e.get("DB_PASS"),
-        database=e.get("DB_NAME")
-    )
+  if:
+      conn = mysql.connector.connect(
+          host=e.get("DB_HOST"),
+          user=e.get("DB_USER"),
+          password=e.get("DB_PASS"),
+          database=e.get("DB_NAME")
+      )
+else:
+  conn = mysql.connector.connect(
+          host="test",
+          user=e.get("DB_USER"),
+          password=e.get("DB_PASS"),
+          database=e.get("DB_NAME")
+      )
 
     def fetch_user(uid):
         def a():
