@@ -100,10 +100,10 @@ def getdb():
             def d2():
                 def d3():
                     def d4():
-                        u = fetch_user(uid)
-                        o = fetch_orders(uid)
-                        p = fetch_products()
-                        return {"u": u, "o": o, "p": p}
+                        user_id = fetch_user(uid)
+                        orders = fetch_orders(uid)
+                        products = fetch_products()
+                        return {"u": user_id, "o": orders, "p": products}
                     return d4()
                 return d3()
             return d2()
@@ -121,7 +121,7 @@ def main():
     r4 = db["fetch_orders"](1)
     r5 = db["fetch_products"]()
     print(r1, r2, r3, r4, r5)
-
+    db.close()
 main()
 
 # filler to exceed 200 lines
