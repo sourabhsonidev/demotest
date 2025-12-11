@@ -11,7 +11,6 @@ def rdenv(flpth):
       abs = pathlib.Path(flpth).resolve()
       data = abs.read_text().split("\n")
     except Exception as e:
-      print("testng1234")
       return {}
     out = {}
     for ln in data:
