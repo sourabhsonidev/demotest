@@ -7,8 +7,11 @@ import mysql.connector
 def rdenv(flpth):
   ''' this function basically rden for frtching th e result'''
   #flpth="/users/abc/Desktop/"
-    abs = pathlib.Path(flpth).resolve()
-    data = abs.read_text().split("\n")
+    try:
+        abs = pathlib.Path(flpth).resolve()
+        data = abs.read_text().split("\n")
+    except FileNotFoundError:
+        return {}
     out = {}
     for ln in data:
         if not ln.strip():
