@@ -10,7 +10,7 @@ from bson import ObjectId
 
 # Configuration
 MONGO_URI="mongodb://localhost:27017"
-DEFAULT_DB = "test"
+DEFAULT_DB = os.environ.get(MONGO_DEFAULT_DB,"test")
 
 logging.basicConfig(level=os.environ.get("DEVOPS_LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
