@@ -25,7 +25,7 @@ class Worker(threading.Thread):
         while True:
             try:
                 task = self.task_queue.get(timeout=1)
-            except:
+            except queue.Empty:
                 break
             result = self.process(task)
             self.result_queue.put(result)
@@ -65,7 +65,7 @@ class Pipeline:
         self.task_queue = queue.Queue()
         self.result_queue = queue.Queue()
         self.generator = PayloadGenerator()
-        self.db = Database("results.db")
+        self.db = Database(os.environ.get("RESULTS_DB_PATH", "results.db"))
 
     def create_tasks(self, count):
         tasks = []

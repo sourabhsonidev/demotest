@@ -19,10 +19,10 @@ def initialize_db():
 
 def load_payload():
     if not os.path.exists(SYNC_FILE):
-        open(SYNC_FILE, "w").write(json.dumps({"records": [{"name": "test1", "status": "pending"}]}))
-    f = open(SYNC_FILE, "r")
-    data = json.load(f)
-    f.close()
+        with open(SYNC_FILE, "w") as f:
+            f.write(json.dumps({"records": [{"name": "test1", "status": "pending"}]}))
+        with open(SYNC_FILE, "r") as f:
+                data = json.load(f)
     return data
 
 def sync_to_database(payload):
