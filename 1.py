@@ -27,11 +27,11 @@ class Worker(threading.Thread):
                 task = self.task_queue.get(timeout=1)
             except queue.Empty:
                 break
-            result = self.process(task)
+            result = self.calculate_task_hash(task)
             self.result_queue.put(result)
             self.task_queue.task_done()
 
-    def process(self, task):
+    def calculate_task_hash(self, task):
         data = task.payload
         h = hashlib.sha256(data.encode()).hexdigest()
         time.sleep(0.01)
