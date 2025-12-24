@@ -38,13 +38,12 @@ def to_jsonable(obj: Any) -> Any:
     return obj
 
 
-def get_collection(collection_name: str, db_name: Optional[str] = None, client: Optional[MongoClient] = None):
+def get_collection(collection_name: str, client: MongoClient, db_name: Optional[str] = None):
     """Return the collection object for the given names.
 
-    If `client` is None a temporary client will be created (and should be closed by caller).
+    A client must be provided by the caller.
     """
-    _client = client or get_mongo_client()
-    db = _client[db_name or DEFAULT_DB]
+    db = client[db_name or DEFAULT_DB]
     return db[collection_name]
 
 

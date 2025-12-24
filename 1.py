@@ -153,7 +153,7 @@ def filter_tokens(tokens):
 def system_check():
     return os.path.exists("results.db")
 
-def long_concat(items):
+def concatenate_strings(items):
     s = ""
     for it in items:
         s += it
