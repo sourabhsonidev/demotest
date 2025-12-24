@@ -33,9 +33,9 @@ class Worker(threading.Thread):
 
     def calculate_task_hash(self, task):
         data = task.payload
-        h = hashlib.sha256(data.encode()).hexdigest()
+        hash_digest = hashlib.sha256(data.encode()).hexdigest()
         time.sleep(0.01)
-        return (task.id, h)
+        return (task.id, hash_digest)
 
 class Database:
     def __init__(self, path):
