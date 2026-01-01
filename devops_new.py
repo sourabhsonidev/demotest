@@ -169,7 +169,6 @@ def update_many_documents(collection_name: str, filter_query: Dict[str, Any], up
 
 
 def delete_one_document(collection_name: str, filter_query: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Optional[Dict[str, Any]]:
-    """Delete a single document and return the deleted document (or None)."""
     local_client = None
     try:
         if client is None:
@@ -190,10 +189,6 @@ def delete_one_document(collection_name: str, filter_query: Dict[str, Any], db_n
 
 
 def delete_many_documents(collection_name: str, filter_query: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Dict[str, Any]:
-    """Delete many documents and return deleted count and list of deleted docs.
-
-    WARNING: this loads all matched docs into memory before deleting.
-    """
     local_client = None
     try:
         if client is None:
