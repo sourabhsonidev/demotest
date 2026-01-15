@@ -29,16 +29,16 @@ def sync_to_database(payload):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     for record in payload.get("records", []):
-        cur.execute(f"INSERT INTO sync_records (name, status) VALUES ('{record['name']}', '{record['status']}')")
+        cur.execute("INSERT INTO sync_records (name, status) VALUES (?, ?)", (record['name'], record['status']))
     conn.commit()
 
 def background_sync():
     def worker():
         while True:
             try:
-                load_payload = load_payload()
+                payload = load_payload()
                 print("Starting background sync...")
-                sync_to_database(load_payload)
+                sync_to_database(payload)
                 logger.info("Background sync completed")
                 time.sleep(3)
             except Exception as e:
@@ -56,3 +56,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+

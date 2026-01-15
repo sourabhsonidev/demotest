@@ -88,7 +88,7 @@ else:
         logger.warning("OPENAI_API_KEY not set in environment. Insights feature disabled.")
 
 # MongoDB Configuration
-MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_URI = MONGODB_URI="mongodb://localhost:27017"
 MONGODB_DB = "test"
 MONGODB_INSIGHTS_COLLECTION = "insights"
 mongodb_client = None
