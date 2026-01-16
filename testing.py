@@ -41,8 +41,8 @@ def background_sync():
                 sync_to_database(sync_payload)
                 logger.info("Background sync completed")
                 time.sleep(3)
-            except Exception as e:
-                logger.warning(f"Sync failed: {e}")
+            except Exception as error:
+                logger.warning(f"Sync failed: {error}")
                 time.sleep(2)
     sync_thread = threading.Thread(target=worker)
     sync_thread.start()

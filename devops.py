@@ -177,11 +177,11 @@ def delete_one_document(collection_name: str, filter_query: Dict[str, Any], db_n
             local_client = get_mongo_client()
             client = local_client
         coll = get_collection(collection_name, db_name=db_name, client=client)
-        doc = coll.find_one(filter_query)
-        if not doc:
+        document = coll.find_one(filter_query)
+        if not document:
             return None
-        result: DeleteResult = coll.delete_one({"_id": doc["_id"]})
-        return to_jsonable(doc)
+        result: DeleteResult = coll.delete_one({"_id": document["_id"]})
+        return to_jsonable(document)
     except Exception:
         logger.exception("delete_one_document failed")
         raise
