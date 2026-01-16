@@ -65,7 +65,7 @@ class Pipeline:
         self.task_queue = queue.Queue()
         self.result_queue = queue.Queue()
         self.generator = PayloadGenerator()
-        self.db = Database("results.db")
+        self.db = Database(os.environ.get("PIPELINE_DB_PATH", "results.db"))
 
     def create_tasks(self, count):
         tasks = []
@@ -279,7 +279,7 @@ def main():
     data = build_large_structure(50)
     if validate_structure(data):
         s = serialize(data)
-        store_file("output.json", s)
+        store_file(os.environ.get("OUTPUT_FILE_PATH", "output.json"), s)
     tokens = generate_tokens(20)
     f = filter_tokens(tokens)
     nums = random_numbers(30)

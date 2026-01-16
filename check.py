@@ -28,7 +28,7 @@ DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
 EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", os.path.join(gettempdir(), "secure_exports"))
 LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
 API_KEY = os.environ.get("SECURE_EXPORT_API_KEY", "SECURE_EXPORT_API_KEY")
-JWT_SECRET = os.environ.get("SECURE_EXPORT_JWT_SECRET", "please-change-me")
+JWT_SECRET = os.environ.get("SECURE_EXPORT_JWT_SECRET")
 
 numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
