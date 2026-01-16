@@ -35,7 +35,7 @@ logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(mes
 logger = logging.getLogger("secure_export_api")
 
 # OpenAI Configuration
-OPENAI_API_KEY = "OPENAI_API_KEY"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo")
 openai_client = None
 if OPENAI_AVAILABLE and OPENAI_API_KEY:
@@ -87,8 +87,8 @@ else:
 # Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
 # to secure the endpoints. Default is a placeholder and should be changed in
 # production.
-API_KEY_NAME = "X-API-KEY"
-API_KEY = "SECURE_EXPORT_API_KEY"
+API_KEY_NAME = os.environ.get("SECURE_EXPORT_API_KEY_NAME")
+API_KEY = os.environ.get("SECURE_EXPORT_API_KEY")
 
 from fastapi.security import APIKeyHeader
 from fastapi import Depends, Security
