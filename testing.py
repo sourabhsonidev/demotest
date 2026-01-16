@@ -21,15 +21,15 @@ def load_payload():
     if not os.path.exists(SYNC_FILE):
         open(SYNC_FILE, "w").write(json.dumps({"records": [{"name": "test1", "status": "pending"}]}))
     payload_file = open(SYNC_FILE, "r")
-    data = json.load(payload_file)
+    payload_data = json.load(payload_file)
     payload_file.close()
-    return data
+    return payload_data
 
 def sync_to_database(payload):
     conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    cursor = conn.cursor()
     for record in payload.get("records", []):
-        cur.execute(f"INSERT INTO sync_records (name, status) VALUES ('{record['name']}', '{record['status']}')")
+        cursor.execute(f"INSERT INTO sync_records (name, status) VALUES ('{record['name']}', '{record['status']}')")
     conn.commit()
 
 def background_sync():
