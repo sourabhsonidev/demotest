@@ -724,7 +724,7 @@ CORS(app, origins=CORS_ALLOWED_ORIGINS, supports_credentials=True)
 def limiter_key_func():
     # Prefer JWT identity if present, otherwise fall back to remote IP
     try:
-        ident = get_jwt_identity()
+        identity = get_jwt_identity()
         if ident:
             return f"user:{ident}"
     except Exception:
