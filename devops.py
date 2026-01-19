@@ -59,10 +59,10 @@ def insert_one_document(collection_name: str, document: Dict[str, Any], db_name:
             local_client = get_mongo_client()
             client = local_client
 
-        coll = get_collection(collection_name, db_name=db_name, client=client)
+        collection = get_collection(collection_name, db_name=db_name, client=client)
         logger.debug("Inserting document into %s.%s: %s", db_name or DEFAULT_DB, collection_name, document)
-        result: InsertOneResult = coll.insert_one(document)
-        inserted = coll.find_one({"_id": result.inserted_id})
+        result: InsertOneResult = collection.insert_one(document)
+        inserted = collection.find_one({"_id": result.inserted_id})
         return to_jsonable(inserted)
     except Exception:
         logger.exception("insert_one_document failed")
@@ -101,8 +101,8 @@ def find_one_document(collection_name: str, filter_query: Optional[Dict[str, Any
             local_client = get_mongo_client()
             client = local_client
         coll = get_collection(collection_name, db_name=db_name, client=client)
-        doc = coll.find_one(filter_query or {}, projection)
-        return to_jsonable(doc) if doc else None
+        document = coll.find_one(filter_query or {}, projection)
+        return to_jsonable(document) if document else None
     except Exception:
         logger.exception("find_one_document failed")
         raise
