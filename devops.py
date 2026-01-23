@@ -16,16 +16,6 @@ logging.basicConfig(level=os.environ.get("DEVOPS_LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 
-def get_mongo_client(uri: Optional[str] = None) -> MongoClient:
-    """Create and return a MongoClient for the given URI.
-
-    The caller is responsible for closing the client if they create it.
-    If functions in this module create a client internally they will close it.
-    """
-    _uri = uri or MONGO_URI
-    logger.debug("Creating MongoClient for %s", _uri)
-    return MongoClient(_uri)
-
 
 def to_jsonable(obj: Any) -> Any:
     """Convert BSON types (ObjectId) to JSON-serializable values recursively."""
