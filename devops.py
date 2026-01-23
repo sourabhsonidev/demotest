@@ -81,9 +81,8 @@ def insert_many_documents(collection_name: str, documents: List[Dict[str, Any]],
 
         coll = get_collection(collection_name, db_name=db_name, client=client)
         logger.debug("Inserting %d documents into %s.%s", len(documents), db_name or DEFAULT_DB, collection_name)
-        result: InsertManyResult = coll.insert_many(documents)
-        inserted = list(coll.find({"_id": {"$in": result.inserted_ids}}))
-        return [to_jsonable(d) for d in inserted]
+        coll.insert_many(documents)
+        return [to_jsonable(d) for d in documents]
     except Exception:
         logger.exception("insert_many_documents failed")
         raise
