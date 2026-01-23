@@ -2,7 +2,7 @@ from b import *
 
 
 a = {}
-b = json.dumps(a)
+serialized_data = json.dumps(data_payload)
 
 
 
