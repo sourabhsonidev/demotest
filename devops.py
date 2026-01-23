@@ -48,6 +48,171 @@ def get_collection(collection_name: str, db_name: Optional[str] = None, client: 
     return db[collection_name]
 
 
+def insert_one_document(collection_name: str, document: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Dict[str, Any]:
+    """Insert a single document and return it (with _id serialized).
+
+    If client is not provided this function will create and close a client.
+    """
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+
+        collection = get_collection(collection_name, db_name=db_name, client=client)
+        logger.debug("Inserting document into %s.%s: %s", db_name or DEFAULT_DB, collection_name, document)
+        result: InsertOneResult = collection.insert_one(document)
+        inserted = collection.find_one({"_id": result.inserted_id})
+        return to_jsonable(inserted)
+    except Exception:
+        logger.exception("insert_one_document failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def insert_many_documents(collection_name: str, documents: List[Dict[str, Any]], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> List[Dict[str, Any]]:
+    """Insert multiple documents and return the inserted documents."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        logger.debug("Inserting %d documents into %s.%s", len(documents), db_name or DEFAULT_DB, collection_name)
+        result: InsertManyResult = coll.insert_many(documents)
+        inserted = list(coll.find({"_id": {"$in": result.inserted_ids}}))
+        return [to_jsonable(d) for d in inserted]
+    except Exception:
+        logger.exception("insert_many_documents failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def find_one_document(collection_name: str, filter_query: Optional[Dict[str, Any]] = None, projection: Optional[Dict[str, int]] = None, db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Optional[Dict[str, Any]]:
+    """Return a single matching document (or None)."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        document = coll.find_one(filter_query or {}, projection)
+        return to_jsonable(document) if document else None
+    except Exception:
+        logger.exception("find_one_document failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def find_documents(collection_name: str, filter_query: Optional[Dict[str, Any]] = None, projection: Optional[Dict[str, int]] = None, limit: Optional[int] = None, skip: int = 0, db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> List[Dict[str, Any]]:
+    """Return a list of documents matching filter, with optional pagination."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        cursor = coll.find(filter_query or {}, projection).skip(skip)
+        if limit:
+            cursor = cursor.limit(limit)
+        docs = list(cursor)
+        return [to_jsonable(d) for d in docs]
+    except Exception:
+        logger.exception("find_documents failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def update_one_document(collection_name: str, filter_query: Dict[str, Any], update_query: Dict[str, Any], upsert: bool = False, db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Optional[Dict[str, Any]]:
+    """Update one document and return the updated document (or None)."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        updated = coll.find_one_and_update(filter_query, update_query, upsert=upsert, return_document=ReturnDocument.AFTER)
+        return to_jsonable(updated) if updated else None
+    except Exception:
+        logger.exception("update_one_document failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def update_many_documents(collection_name: str, filter_query: Dict[str, Any], update_query: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Dict[str, Any]:
+    """Update many documents and return a summary and the updated docs."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        result: UpdateResult = coll.update_many(filter_query, update_query)
+        updated_docs = list(coll.find(filter_query))
+        return {"matched_count": result.matched_count, "modified_count": result.modified_count, "updated_docs": [to_jsonable(d) for d in updated_docs]}
+    except Exception:
+        logger.exception("update_many_documents failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def delete_one_document(collection_name: str, filter_query: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Optional[Dict[str, Any]]:
+    """Delete a single document and return the deleted document (or None)."""
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        document = coll.find_one(filter_query)
+        if not document:
+            return None
+        result: DeleteResult = coll.delete_one({"_id": document["_id"]})
+        return to_jsonable(document)
+    except Exception:
+        logger.exception("delete_one_document failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
+
+def delete_many_documents(collection_name: str, filter_query: Dict[str, Any], db_name: Optional[str] = None, client: Optional[MongoClient] = None) -> Dict[str, Any]:
+    """Delete many documents and return deleted count and list of deleted docs.
+
+    WARNING: this loads all matched docs into memory before deleting.
+    """
+    local_client = None
+    try:
+        if client is None:
+            local_client = get_mongo_client()
+            client = local_client
+        coll = get_collection(collection_name, db_name=db_name, client=client)
+        docs = list(coll.find(filter_query))
+        if not docs:
+            return {"deleted_count": 0, "deleted_docs": []}
+        result: DeleteResult = coll.delete_many(filter_query)
+        return {"deleted_count": result.deleted_count, "deleted_docs": [to_jsonable(d) for d in docs]}
+    except Exception:
+        logger.exception("delete_many_documents failed")
+        raise
+    finally:
+        if local_client:
+            local_client.close()
+
 
 if __name__ == "__main__":
     # Example usage (requires a running MongoDB instance)
