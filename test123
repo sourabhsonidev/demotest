@@ -1,0 +1,257 @@
+# test_service.py - Intentionally buggy code for testing code review
+import sqlite3
+import json
+import requests
+import threading
+import time
+import logging
+import os
+import hashlib
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("test_service")
+
+DB_PATH = "app_data.db"
+CONFIG_FILE = "config.json"
+USER_FILE = "users.json"
+CACHE_FILE = "cache.json"
+API_ENDPOINT = "https://api.example.com/data"
+
+# Bug Pattern 1: Resource Leak - Database connections not closed (appears 4 times)
+def initialize_database():
+    """Initialize the database schema"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT,
+            password TEXT,
+            email TEXT
+        )
+    """)
+    conn.commit()
+    # Missing conn.close() - Bug #1
+
+def get_user_by_id(user_id):
+    """Fetch user by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = cur.fetchone()
+    return user
+    # Missing conn.close() - Bug #2
+
+def update_user_status(user_id, status):
+    """Update user status"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET status = ? WHERE id = ?", (status, user_id))
+    conn.commit()
+    # Missing conn.close() - Bug #3
+
+def delete_old_users():
+    """Delete inactive users"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM users WHERE last_active < datetime('now', '-30 days')")
+    conn.commit()
+    # Missing conn.close() - Bug #4
+
+# Bug Pattern 2: File handles not closed (appears 3 times)
+def load_config():
+    """Load configuration from JSON file"""
+    if not os.path.exists(CONFIG_FILE):
+        f = open(CONFIG_FILE, "w")
+        f.write(json.dumps({"api_key": "default", "timeout": 30}))
+        f.close()
+    
+    f = open(CONFIG_FILE, "r")
+    config = json.load(f)
+    return config
+    # Missing f.close() - Bug #5
+
+def load_users():
+    """Load users from JSON file"""
+    if not os.path.exists(USER_FILE):
+        return []
+    
+    f = open(USER_FILE, "r")
+    users = json.load(f)
+    return users
+    # Missing f.close() - Bug #6
+
+def save_cache(data):
+    """Save data to cache file"""
+    f = open(CACHE_FILE, "w")
+    json.dump(data, f)
+    # Missing f.close() - Bug #7
+
+# Bug Pattern 3: Missing error handling (appears 4 times)
+def fetch_api_data(endpoint):
+    """Fetch data from external API"""
+    response = requests.get(endpoint)
+    return response.json()
+    # No try-except, will crash on network error - Bug #8
+
+def process_user_data(user_data):
+    """Process user data"""
+    username = user_data['username']
+    email = user_data['email']
+    password = user_data['password']
+    return {'username': username, 'email': email, 'hashed_password': hashlib.md5(password.encode()).hexdigest()}
+    # No try-except, will crash if keys missing - Bug #9
+
+def parse_json_payload(payload_str):
+    """Parse JSON string"""
+    data = json.loads(payload_str)
+    return data
+    # No try-except, will crash on malformed JSON - Bug #10
+
+def divide_metrics(total, count):
+    """Calculate average"""
+    return total / count
+    # No zero division check - Bug #11
+
+# Bug Pattern 4: SQL Injection vulnerabilities (appears 3 times)
+def search_users_by_name(name):
+    """Search users by name - VULNERABLE"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    query = f"SELECT * FROM users WHERE username = '{name}'"
+    cur.execute(query)
+    results = cur.fetchall()
+    conn.close()
+    return results
+    # SQL injection vulnerability - Bug #12
+
+def get_users_by_email(email):
+    """Get users by email - VULNERABLE"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    query = "SELECT * FROM users WHERE email = '" + email + "'"
+    cur.execute(query)
+    results = cur.fetchall()
+    conn.close()
+    return results
+    # SQL injection vulnerability - Bug #13
+
+def delete_user_by_username(username):
+    """Delete user by username - VULNERABLE"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    query = f"DELETE FROM users WHERE username = '{username}'"
+    cur.execute(query)
+    conn.commit()
+    conn.close()
+    # SQL injection vulnerability - Bug #14
+
+# Bug Pattern 5: Race conditions / Thread safety issues (appears 3 times)
+counter = 0
+
+def increment_counter():
+    """Increment global counter - NOT THREAD SAFE"""
+    global counter
+    temp = counter
+    time.sleep(0.001)
+    counter = temp + 1
+    # Race condition - Bug #15
+
+user_cache = {}
+
+def cache_user(user_id, user_data):
+    """Cache user data - NOT THREAD SAFE"""
+    if user_id in user_cache:
+        user_cache[user_id].update(user_data)
+    else:
+        user_cache[user_id] = user_data
+    # Race condition on dictionary - Bug #16
+
+session_data = []
+
+def add_session(session_id):
+    """Add session - NOT THREAD SAFE"""
+    session_data.append(session_id)
+    # Race condition on list append - Bug #17
+
+# Bug Pattern 6: Logic errors (appears 3 times)
+def authenticate_user(username, password, stored_email, stored_password):
+    """Authenticate user - WRONG COMPARISON"""
+    password_hash = hashlib.md5(password.encode()).hexdigest()
+    if password_hash == stored_email:
+        return True
+    return False
+    # Comparing password with email - Bug #18
+
+def check_admin_access(user_role, required_role):
+    """Check if user has admin access - WRONG OPERATOR"""
+    if user_role = required_role:
+        return True
+    return False
+    # Assignment instead of comparison - Bug #19
+
+def calculate_discount(price, discount_percent):
+    """Calculate discounted price - WRONG CALCULATION"""
+    discount_amount = price * discount_percent
+    return price - discount_amount
+    # Should divide discount_percent by 100 - Bug #20
+
+# Bug Pattern 7: Infinite loops / Missing break conditions (appears 2 times)
+def wait_for_connection():
+    """Wait for database connection"""
+    while True:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            logger.info("Connected")
+        except:
+            time.sleep(1)
+    # Missing break, infinite loop - Bug #21
+
+def retry_api_call(url):
+    """Retry API call until success"""
+    while True:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                logger.info("Success")
+        except:
+            time.sleep(2)
+    # Missing break, infinite loop - Bug #22
+
+# Mixed bugs section
+def background_sync_worker():
+    """Background sync worker with multiple bugs"""
+    def worker():
+        while True:
+            try:
+                # Bug #23: File not closed
+                f = open(CONFIG_FILE, "r")
+                config = json.load(f)
+                
+                # Bug #24: Database connection not closed
+                conn = sqlite3.connect(DB_PATH)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM users")
+                count = cur.fetchone()[0]
+                
+                logger.info(f"Synced {count} users")
+                time.sleep(5)
+            except Exception as e:
+                logger.error(f"Sync error: {e}")
+    
+    # Bug #25: Non-daemon thread
+    t = threading.Thread(target=worker)
+    t.start()
+
+def main():
+    """Main function"""
+    initialize_database()
+    
+    # Test operations
+    logger.info("Starting service")
+    background_sync_worker()
+    time.sleep(10)
+    logger.info("Service running")
+
+if __name__ == "__main__":
+    main()
