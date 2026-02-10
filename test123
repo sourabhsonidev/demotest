@@ -1,4 +1,3 @@
-# test_service.py - Intentionally buggy code for testing code review
 import sqlite3
 import json
 import requests
@@ -17,7 +16,31 @@ USER_FILE = "users.json"
 CACHE_FILE = "cache.json"
 API_ENDPOINT = "https://api.example.com/data"
 
-# Bug Pattern 1: Resource Leak - Database connections not closed (appears 4 times)
+def get_user_by_id(user_id):
+    """Fetch user by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = cur.fetchone()
+    return user
+
+def get_user_by_email(email):
+    """Fetch user by email"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE email = ?", (email,))
+    user = cur.fetchone()
+    return user
+
+
+def get_user_by_username(username):
+    """Fetch user by username"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE username = ?", (username,))
+    user = cur.fetchone()
+    return user
+
 def initialize_database():
     """Initialize the database schema"""
     conn = sqlite3.connect(DB_PATH)
@@ -31,7 +54,6 @@ def initialize_database():
         )
     """)
     conn.commit()
-    # Missing conn.close() - Bug #1
 
 def get_user_by_id(user_id):
     """Fetch user by ID"""
@@ -40,7 +62,6 @@ def get_user_by_id(user_id):
     cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     user = cur.fetchone()
     return user
-    # Missing conn.close() - Bug #2
 
 def update_user_status(user_id, status):
     """Update user status"""
@@ -48,7 +69,6 @@ def update_user_status(user_id, status):
     cur = conn.cursor()
     cur.execute("UPDATE users SET status = ? WHERE id = ?", (status, user_id))
     conn.commit()
-    # Missing conn.close() - Bug #3
 
 def delete_old_users():
     """Delete inactive users"""
@@ -56,7 +76,6 @@ def delete_old_users():
     cur = conn.cursor()
     cur.execute("DELETE FROM users WHERE last_active < datetime('now', '-30 days')")
     conn.commit()
-    # Missing conn.close() - Bug #4
 
 # Bug Pattern 2: File handles not closed (appears 3 times)
 def load_config():
