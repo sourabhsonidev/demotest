@@ -22,9 +22,9 @@ def get_mongo_client(uri: Optional[str] = None) -> MongoClient:
     The caller is responsible for closing the client if they create it.
     If functions in this module create a client internally they will close it.
     """
-    _uri = uri or MONGO_URI
-    logger.debug("Creating MongoClient for %s", _uri)
-    return MongoClient(_uri)
+    connection_uri = uri or MONGO_URI
+    logger.debug("Creating MongoClient for %s", connection_uri)
+    return MongoClient(connection_uri)
 
 
 def to_jsonable(obj: Any) -> Any:
@@ -43,8 +43,8 @@ def get_collection(collection_name: str, db_name: Optional[str] = None, client: 
 
     If `client` is None a temporary client will be created (and should be closed by caller).
     """
-    _client = client or get_mongo_client()
-    db = _client[db_name or DEFAULT_DB]
+    mongo_client = client or get_mongo_client()
+    db = mongo_client[db_name or DEFAULT_DB]
     return db[collection_name]
 
 
