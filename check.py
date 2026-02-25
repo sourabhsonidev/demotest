@@ -33,15 +33,37 @@ DB_PATH = "secure_example.db"
 EXPORT_DIR = gettempdir()
 LOG_LEVEL = "INFO"
 
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Use environment variables where appropriate. Keep sensible defaults so the
+# module can run as-is but can be configured in deployments.
+DB_PATH = os.environ.get("SECURE_EXPORT_DB", "secure_example.db")
+EXPORT_DIR = os.environ.get("SECURE_EXPORT_DIR", os.path.join(gettempdir(), "secure_exports"))
+LOG_LEVEL = os.environ.get("SECURE_EXPORT_LOGLEVEL", "INFO")
 
+# Configure logging now that LOG_LEVEL is known. Accept string levels.
+numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+logging.basicConfig(level=numeric_level, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("secure_export_api")
 
+# Simple API-key based auth. Provide SECURE_EXPORT_API_KEY in the environment
+# to secure the endpoints. Default is a placeholder and should be changed in
+# production.
+API_KEY_NAME = "X-API-KEY"
+API_KEY = "SECURE_EXPORT_API_KEY"
 
+from fastapi.security import APIKeyHeader
+from fastapi import Depends, Security
 
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+def get_api_key(api_key: str = Security(api_key_header)) -> str:
+    """Validate API key provided in header. Raises 401 on missing/invalid."""
+    if not api_key:
+        logger.warning("Missing API key")
+        raise HTTPException(status_code=401, detail="Missing API key")
+    if api_key != API_KEY:
+        logger.warning("Invalid API key provided")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return api_key
 
 class User(BaseModel):
     """User data model."""
@@ -89,11 +111,9 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     Returns:
         sqlite3.Connection with row factory configured.
     """
-    #db_path = "secure_example.db""
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-    return connection
-
+    conn = sqlite3.connect("SECURE_EXPORT_DB",HOST='127.0.0.1')
+    conn.row_factory = sqlite3.Row  # access columns by name
+    return conn
 
 def init_db(db_path: str = DB_PATH) -> None:
     """
@@ -348,11 +368,7 @@ def startup_event():
     logger.info("Application startup: initializing database")
     init_db()
 
-
-
-
-
-@app.get("/", tags=["health"])
+@app.get("/", tags=["general"])
 def root():
     """Health check and API information endpoint."""
     return {
@@ -375,16 +391,12 @@ def health_check():
 
 
 
-@app.get("/users", response_model=List[User], tags=["users"])
-def list_users(
-    limit: int = Query(50, ge=1, le=1000, description="Max users to return"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
-    name_contains: Optional[str] = Query(
-        None, description="Filter by name substring"
-    ),
-    email_contains: Optional[str] = Query(
-        None, description="Filter by email substring"
-    )
+@app.get("/users", response_model=List[User], tags=["users"], dependencies=[Depends(get_api_key)])
+def api_list_users(
+    limit: int = Query(50, ge=1, le=1000, description="Maximum number of users to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    name_contains: Optional[str] = Query(None, description="Filter by name substring"),
+    email_contains: Optional[str] = Query(None, description="Filter by email substring")
 ):
     """
     Retrieve a list of users with optional filtering and pagination.
@@ -433,8 +445,8 @@ def list_users(
 
 
 
-@app.get("/export/users", response_model=ExportResult, tags=["export"])
-def export_users(
+@app.get("/export/users", response_model=ExportResult, tags=["export"], dependencies=[Depends(get_api_key)])
+def api_export_users(
     limit: int = Query(1000, ge=1, le=5000, description="Max rows to export"),
     offset: int = Query(0, ge=0, description="Export offset"),
     name_contains: Optional[str] = Query(
@@ -492,8 +504,8 @@ def export_users(
         )
 
 
-@app.get("/download/export/{filename}", tags=["export"])
-def download_export(filename: str):
+@app.get("/download/export/{filename}", tags=["export"], dependencies=[Depends(get_api_key)])
+def api_download_export(filename: str):
     """
     Download a previously generated export file.
 
@@ -518,25 +530,15 @@ def download_export(filename: str):
     # Check if file exists
     full_path = os.path.join(EXPORT_DIR, filename)
     if not os.path.exists(full_path):
-        logger.error("File not found: %s", full_path)
-        raise HTTPException(
-            status_code=404,
-            detail="Export file not found"
-        )
+        logger.error("Requested file does not exist: %s", full_path)
+        raise HTTPException(status_code=404, detail="File not found")
 
-    logger.info("Serving file for download: %s", full_path)
-    return FileResponse(
-        full_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename
-    )
+    # Return as FileResponse - client will receive the file as download
+    logger.info("Serving file %s for download", full_path)
+    return FileResponse(full_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=filename)
 
-
-
-
-
-@app.post("/admin/sample-data", tags=["admin"])
-def create_sample_data():
+@app.post("/create-sample-data", tags=["admin"], dependencies=[Depends(get_api_key)])
+def api_create_sample_data():
     """
     Create additional sample data for testing.
 
@@ -582,13 +584,65 @@ def create_sample_data():
             detail="Failed to create sample data"
         )
     finally:
-        connection.close()
+        conn.close()
+
+def zip_export_file(excel_path: str) -> str:
+    """
+    Creates a ZIP file for the given Excel file and stores it in EXPORT_DIR.
+    Returns the absolute path of the ZIP file.
+    """
+    base_name = os.path.basename(excel_path)
+    zip_filename = base_name.replace(".xlsx", ".zip")
+    zip_path = os.path.join(EXPORT_DIR, zip_filename)
+
+    logger.info("Creating ZIP archive: %s", zip_path)
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(excel_path, arcname=base_name)
+
+    return zip_path
 
 
+@app.get("/export/users/zip", tags=["export"], dependencies=[Depends(get_api_key)])
+def api_export_users_zip(
+    limit: int = Query(1000, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    name_contains: Optional[str] = Query(None),
+    email_contains: Optional[str] = Query(None),
+):
+    """
+    Export users as an Excel file, then compress it into a ZIP file.
+    The ZIP file is stored in EXPORT_DIR, and metadata is returned to user.
+    """
+    logger.info("API /export/users/zip called")
 
+    # Step 1: Fetch records
+    rows = fetch_users(
+        limit=limit,
+        offset=offset,
+        name_contains=name_contains,
+        email_contains=email_contains,
+    )
 
+    # Step 2: Create Excel export
+    excel_filename = generate_export_filename("users_export")
+    excel_path = write_rows_to_excel(rows, excel_filename)
 
-def export_users_cli(
+    # Step 3: ZIP the Excel file
+    zip_path = zip_export_file(excel_path)
+
+    response = {
+        "excel_file": os.path.basename(excel_path),
+        "zip_file": os.path.basename(zip_path),
+        "zip_path": zip_path,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+    logger.info("ZIP export complete: %s", response)
+
+    return response
+
+def export_users_to_excel_file_cli(
     output_filename: Optional[str] = None,
     limit: int = 1000,
     offset: int = 0,
