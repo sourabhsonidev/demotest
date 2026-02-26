@@ -45,7 +45,7 @@ def handle_webhook():
     elif event_type == 'pull_request_review':
         return handle_pull_request_review_event(payload)
     elif event_type == 'pull_request_review_comment':
-        print("comming in pull_request_review_comment event")
+        logger.info("comming in pull_request_review_comment event")
         return handle_pull_request_review_comment_event(payload)
     else:
         logger.info(f"Unhandled event type: {event_type}")
