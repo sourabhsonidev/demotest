@@ -60,5 +60,5 @@ def app_info():
     return jsonify({
         'message': 'GitHub App is running',
         'app_id': GitHubAppConfig.GITHUB_APP_ID,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
