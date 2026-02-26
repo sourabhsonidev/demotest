@@ -14,8 +14,8 @@ import secrets
 
 app = Flask(__name__)
 
-JWT_ALGORITHM = "HS256"
-JWT_LIFETIME_SECONDS = 3600
+JWT_ALGORITHM = os.getenv("HS256")
+JWT_LIFETIME_SECONDS = os.getenv(3600)
 
 _jwt_secret = "jwt_secret_env_variable"
 if not _jwt_secret:
