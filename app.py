@@ -12,7 +12,7 @@ from pr_reviewer.github_app.webhook_handlers import (
 # logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def handle_webhook():
+def process_github_webhook_event():
     """Handle GitHub webhook events"""
     
     # Verify webhook signature
