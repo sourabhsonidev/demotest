@@ -28,6 +28,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from openpyxl import Workbook
 
+# Flask helpers used by some routes
+from flask import Flask, jsonify, request, send_file
+
+# reuse in-memory reassessment DB helpers
+from db import (
+    insert_result,
+    get_result,
+    update_result,
+    DuplicateRecordError,
+    DatabaseUnavailable,
+    RecordNotFoundError,
+    VersionMismatchError,
+)
+
 
 DB_PATH = "secure_example.db"
 EXPORT_DIR = gettempdir()
