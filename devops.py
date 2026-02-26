@@ -41,11 +41,7 @@ else:
         {"id": 3, "name": "Suburban Connector", "stops": ["L", "M", "N", "O"], "duration_mins": 60, "active": False},
         {"id": 4, "name": "Night Line", "stops": ["A", "D", "E"], "duration_mins": 90, "active": True},
         {"id": 5, "name": "Cross Town", "stops": ["B", "F", "G"], "duration_mins": 50, "active": True},
-        {"id": 6, "name": "Harbor Shuttle", "stops": ["H", "I"], "duration_mins": 20, "active": True},
-        {"id": 7, "name": "University Loop", "stops": ["U1", "U2", "U3"], "duration_mins": 35, "active": True},
-        {"id": 8, "name": "Industrial Run", "stops": ["Z1", "Z2", "Z3"], "duration_mins": 55, "active": False},
-        {"id": 9, "name": "Metro Connector", "stops": ["M1", "M2"], "duration_mins": 25, "active": True},
-        {"id": 10, "name": "Coastal Line", "stops": ["C1", "C2", "C3", "C4"], "duration_mins": 70, "active": True}
+
     ]
 
 DB_PATH = os.environ.get("APP_DB_PATH", ":memory:")
