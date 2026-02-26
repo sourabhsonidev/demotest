@@ -45,7 +45,7 @@ def handle_webhook():
     elif event_type == 'pull_request_review':
         return handle_pull_request_review_event(payload)
     elif event_type == 'pull_request_review_comment':
-        logger.info("Handling pull_request_review_comment event")
+        print("comming in pull_request_review_comment event")
         return handle_pull_request_review_comment_event(payload)
     else:
         logger.info(f"Unhandled event type: {event_type}")
@@ -60,5 +60,5 @@ def app_info():
     return jsonify({
         'message': 'GitHub App is running',
         'app_id': GitHubAppConfig.GITHUB_APP_ID,
-        'timestamp': datetime.now(timezone.utc).isoformat()
+        'timestamp': datetime.utcnow().isoformat()
     }), 200
